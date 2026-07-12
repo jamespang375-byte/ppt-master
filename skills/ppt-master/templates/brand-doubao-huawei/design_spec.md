@@ -201,20 +201,52 @@ description: 豆包风格 × 华为配色 — 浅色系华为对外PPT风格，�
 
 > 当 `.env` 中配置了 `IMAGE_BACKEND`（如 zhipu）和 `PEXELS_API_KEY` 时，Strategist 必须将 `image_usage` 设为 `["ai", "web"]`，不得推荐 `none`。
 
-### 配图规则
+### 动态配图规则（HARD — 禁止复用旧图）
+
+> **每次生成新PPT时，必须基于该PPT的具体内容动态搜索和生成图片。**
+> 禁止复用其他项目的图片文件。每份PPT的图片必须与该PPT的内容主题匹配。
+
+#### 图片获取流程（Strategist §VIII 阶段执行）
+
+1. **Strategist 读取源素材**，识别需要配图的页面（产业/场景页）
+2. **为每个需要配图的页面生成搜索关键词**，关键词必须基于该页具体内容
+   - 例如：光伏产业页 → 搜索 "solar panel photovoltaic farm"
+   - 例如：智慧交通页 → 搜索 "smart traffic city autonomous driving"
+   - 例如：芯片竞争页 → 搜索 "AI chip semiconductor manufacturing"
+3. **Pexels搜图**：用 `image_search.py` 搜索，`--filename` 必须带 `.jpg` 扩展名
+   - 关键词要具体（2-5个词最佳），不要泛泛搜索
+   - 每个搜索关键词应该反映该页的核心主题
+4. **AI生图**：用 `image_gen.py` 生成封面/收尾背景图
+   - prompt 要反映该PPT的具体主题，不要用通用prompt
+   - 例如：AI芯片PPT → "Abstract deep navy blue background with golden circuit patterns and chip silhouettes"
+   - 例如：新能源PPT → "Abstract green energy background with wind turbines and solar panels, golden hour"
+5. **图片保存到该项目的 `images/` 目录**，不跨项目复用
+
+#### 配图规则
 
 | 页面类型 | 图片来源 | 用途 | 嵌入方式 |
 |---------|---------|------|---------|
 | **封面** | **不配图** | 纯白+装饰圆+KPI卡片 | **禁止任何图片** |
-| **收尾** | AI生图 | 深蓝渐变背景+图片叠加 | `<image opacity="0.3">` 全画布 |
+| **收尾** | AI生图（基于该PPT主题） | 深蓝渐变背景+图片叠加 | `<image opacity="0.3">` 全画布 |
 | **章节页** | 不配图 | 纯色+巨大数字+圆形装饰 | — |
-| **产业/场景页** | Pexels搜图 | 左文右图 或 上图下数据 | `<image>` 占页面1/3-1/2区域 |
+| **产业/场景页** | Pexels搜图（基于该页内容） | 左文右图 或 上图下数据 | `<image>` 占页面1/3-1/2区域 |
 | **数据密集页** | 不配图 | 纯SVG卡片 | — |
 
-### 图片嵌入方式
+#### 图片嵌入方式
 
 1. **内容页配图**：用布局模式F(左文右图)或G(上图下数据)，图片区域加左侧5px彩条
 2. **收尾**：图片作为全画布背景，深蓝渐变遮罩
+
+#### 搜索关键词规范
+
+| 场景 | 好的关键词 | 差的关键词 |
+|------|-----------|-----------|
+| 光伏产业 | "solar panel photovoltaic farm aerial" | "energy" |
+| 风电产业 | "wind turbine offshore farm" | "power" |
+| 数据中心 | "data center server room blue" | "technology" |
+| AI芯片 | "semiconductor chip manufacturing wafer" | "computer" |
+| 智慧城市 | "smart city digital skyline night" | "city" |
+| 新能源汽车 | "electric vehicle charging station" | "car" |
 
 ## 华为Logo
 
