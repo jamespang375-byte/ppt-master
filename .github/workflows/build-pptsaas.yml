@@ -1,0 +1,183 @@
+# =============================================================================
+# PPT Master Agent SaaS — 可分发产物构建（Linux tar.gz/AppImage + Windows zip）
+#
+# 触发：push tag（v*）或 Actions 页手动 workflow_dispatch。
+# 产物：
+#   - pptsaas-linux-x86_64.tar.gz / pptsaas-x86_64.AppImage（Docker 构建）
+#   - pptsaas-windows-x86_64.zip（windows-latest 原生构建）
+# push tag 时自动发布 GitHub Release 并附全部产物。
+#
+# 两个产物都内嵌便携 Python 运行时（后端 subprocess 调 skills/ppt-master
+# 脚本用），启动器通过 PPTSAAS_PYTHON 指向它（app/backend/config.py）。
+# =============================================================================
+name: build-pptsaas
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Linux artifacts (tar.gz + AppImage) via Docker
+        run: |
+          docker build -f app/packaging/Dockerfile.linux-build \
+              --output type=local,dest=dist .
+          ls -lh dist/
+
+      - name: Smoke test (clean debian container, no system python)
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" debian:bookworm-slim bash -c '
+            set -euo pipefail
+            apt-get update -qq && apt-get install -y -qq curl >/dev/null   # slim 镜像无 curl
+            ! command -v python3 && echo "no system python: OK"            # 确认容器无 python
+            mkdir /w && tar -xzf /dist/pptsaas-linux-x86_64.tar.gz -C /w
+            cd /w/pptsaas
+            ./python/bin/python3.12 -c "import pptx, fitz, PIL, requests, openpyxl"
+            PPTSAAS_PORT=8399 PPTSAAS_HOST=127.0.0.1 nohup ./pptsaas.sh > server.log 2>&1 &
+            ok=""
+            for i in $(seq 1 45); do
+              if curl -fsS http://127.0.0.1:8399/ -o /dev/null 2>/dev/null; then ok=1; break; fi
+              sleep 2
+            done
+            if [ -z "$ok" ]; then echo "SERVER FAILED TO START"; tail -30 server.log; exit 1; fi
+            TOKEN=$(curl -fsS -X POST http://127.0.0.1:8399/api/auth/register \
+              -H "Content-Type: application/json" \
+              -d "{\"username\":\"ci\",\"password\":\"ci-pass-123\"}" | sed -n "s/.*\"token\":\"\([^\"]*\)\".*/\1/p")
+            test -n "$TOKEN"
+            curl -fsS http://127.0.0.1:8399/api/themes -H "Authorization: Bearer $TOKEN" | grep -q "style_md\|商务蓝"
+            echo SMOKE_OK
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pptsaas-linux
+          path: |
+            dist/pptsaas-linux-x86_64.tar.gz
+            dist/pptsaas-x86_64.AppImage
+            dist/SHA256SUMS.txt
+          if-no-files-found: warn
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (build interpreter) + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r skills/ppt-master/requirements.txt -r app/backend/requirements.txt pyinstaller
+
+      - name: PyInstaller onedir build
+        run: |
+          pyinstaller app/packaging/pptsaas.spec --distpath dist --workpath build --noconfirm
+
+      - name: Download embedded Python (python-build-standalone)
+        shell: pwsh
+        run: |
+          $rel = Invoke-RestMethod "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+          $asset = $rel.assets | Where-Object {
+            $_.name -match '^cpython-3\.12\..*-x86_64-pc-windows-msvc-install_only\.tar\.gz$'
+          } | Select-Object -First 1
+          if (-not $asset) { throw "no matching python-build-standalone asset" }
+          Write-Host "Downloading $($asset.name)"
+          Invoke-WebRequest $asset.browser_download_url -OutFile "$env:TEMP\pbs.tar.gz"
+          New-Item -ItemType Directory -Force pkg\pptsaas | Out-Null
+          tar -xzf "$env:TEMP\pbs.tar.gz" -C pkg\pptsaas   # 解出 pkg\pptsaas\python\python.exe
+
+      - name: Install skill deps into embedded Python
+        run: |
+          pkg\pptsaas\python\python.exe -m pip install --no-warn-script-location `
+            -r skills/ppt-master/requirements.txt
+          pkg\pptsaas\python\python.exe -c "import pptx, fitz, PIL, requests, openpyxl"
+
+      - name: Assemble package (onedir + launcher + .env.example)
+        shell: pwsh
+        run: |
+          Copy-Item -Recurse dist\pptsaas pkg\pptsaas\app
+          @'
+          @echo off
+          setlocal
+          set "HERE=%~dp0"
+          set "PPTSAAS_PYTHON=%HERE%python\python.exe"
+          if not defined PPTSAAS_DATA_DIR set "PPTSAAS_DATA_DIR=%HERE%data"
+          if not exist "%PPTSAAS_DATA_DIR%" mkdir "%PPTSAAS_DATA_DIR%"
+          cd /d "%HERE%"
+          "%HERE%app\pptsaas.exe" %*
+          '@ -replace "`n", "`r`n" | Set-Content -NoNewline pkg\pptsaas\start.bat -Encoding ASCII
+          @'
+          # PPT Master Agent SaaS 配置（与 start.bat 同目录；不配 LLM key 为 mock 演示模式）
+          PPTSAAS_LLM_BASE_URL=https://api.deepseek.com/v1
+          PPTSAAS_LLM_API_KEY=
+          PPTSAAS_LLM_MODEL=deepseek-chat
+          # PEXELS_API_KEY=
+          # PPTSAAS_HOST=127.0.0.1
+          # PPTSAAS_PORT=8310
+          '@ -replace "`n", "`r`n" | Set-Content -NoNewline pkg\pptsaas\.env.example -Encoding UTF8
+
+      - name: Smoke test (start server, expect HTTP 200 + register, then kill)
+        shell: pwsh
+        run: |
+          $env:PPTSAAS_PORT = "8399"
+          $env:PPTSAAS_HOST = "127.0.0.1"
+          $proc = Start-Process -FilePath "pkg\pptsaas\start.bat" -PassThru `
+            -RedirectStandardOutput "$env:TEMP\pptsaas-out.log" `
+            -RedirectStandardError "$env:TEMP\pptsaas-err.log"
+          $ok = $false
+          for ($i = 0; $i -lt 45; $i++) {
+            try {
+              $r = Invoke-WebRequest "http://127.0.0.1:8399/" -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { Start-Sleep 2 }
+          }
+          if ($ok) {
+            $body = @{ username = "ci"; password = "ci-pass-123" } | ConvertTo-Json
+            $reg = Invoke-RestMethod -Method Post "http://127.0.0.1:8399/api/auth/register" `
+              -ContentType "application/json" -Body $body
+            $themes = Invoke-RestMethod "http://127.0.0.1:8399/api/themes" `
+              -Headers @{ Authorization = "Bearer $($reg.token)" }
+            Write-Host "themes: $($themes.Count)"
+            if ($themes.Count -lt 1) { $ok = $false }
+          }
+          Get-Process pptsaas -ErrorAction SilentlyContinue | Stop-Process -Force
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Get-Content "$env:TEMP\pptsaas-err.log" -Tail 30 -ErrorAction SilentlyContinue
+          if (-not $ok) { exit 1 }
+          Write-Host "SMOKE_OK"
+
+      - name: Zip package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path pkg\pptsaas -DestinationPath dist\pptsaas-windows-x86_64.zip -Force
+          Get-Item dist\pptsaas-windows-x86_64.zip | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pptsaas-windows
+          path: dist/pptsaas-windows-x86_64.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

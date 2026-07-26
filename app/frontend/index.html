@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPT Master Agent — AI 演示文稿生成</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Crect x='7' y='8' width='18' height='12' rx='2' fill='white'/%3E%3Crect x='7' y='23' width='10' height='2.5' rx='1.2' fill='white' opacity='.8'/%3E%3C/svg%3E">
+</head>
+<body>
+<header id="topbar" class="topbar hidden">
+  <div class="topbar-inner">
+    <a class="brand" href="#/projects">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#2563eb"/>
+        <rect x="7" y="8" width="18" height="12" rx="2" fill="#fff"/>
+        <rect x="7" y="23" width="10" height="2.5" rx="1.2" fill="#fff" opacity=".8"/>
+      </svg>
+      <span>PPT Master Agent</span>
+    </a>
+    <nav class="nav" id="main-nav">
+      <a href="#/projects" data-nav="projects">项目</a>
+      <a href="#/new" data-nav="new">新建项目</a>
+      <a href="#/usage" data-nav="usage">用量</a>
+      <a href="#/admin" data-nav="admin" id="nav-admin" class="hidden">管理</a>
+      <a href="#/settings" data-nav="settings" id="nav-settings" class="hidden">设置</a>
+    </nav>
+    <div class="topbar-user">
+      <div class="user-menu" id="user-menu">
+        <button class="user-trigger" id="user-trigger" aria-haspopup="true">
+          <span class="avatar" id="current-avatar"></span>
+          <span id="current-username" class="username"></span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="user-dropdown hidden" id="user-dropdown">
+          <div class="ud-head"><b id="ud-username"></b><span id="ud-role"></span></div>
+          <a href="#/usage" class="ud-item">用量统计</a>
+          <a href="#/settings" class="ud-item hidden" id="ud-settings">系统设置</a>
+          <button class="ud-item ud-danger" id="btn-logout">退出登录</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+<main id="app" class="container"></main>
+<div id="toast-root" class="toast-root"></div>
+<div id="modal-root"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

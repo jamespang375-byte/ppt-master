@@ -1,0 +1,163 @@
+# =============================================================================
+# PPT Master Agent SaaS — Linux 产物完整构建镜像
+#
+# 在仓库根目录执行（需要 Docker / buildx）：
+#   docker build -f app/packaging/Dockerfile.linux-build \
+#       --output type=local,dest=dist .
+#
+# 产出（写入 dist/）：
+#   pptsaas-linux-x86_64.tar.gz   解压即用包：pptsaas.sh 启动器 + PyInstaller
+#                                 onedir 后端 + 内嵌便携 Python 运行时
+#   pptsaas-x86_64.AppImage       同内容的 AppImage（appimagetool 可下载时）
+#   SHA256SUMS.txt
+#
+# 设计要点：
+#   - 后端经 PyInstaller onedir 打包（入口 app/backend/run.py，datas 含
+#     app/frontend 与 skills/ppt-master/{scripts,templates}）。
+#   - 技能管线脚本（source_to_md / image_search / svg_to_pptx 等）由后端
+#     以 subprocess 调用，目标机没有 Python，因此直接复用构建容器里的
+#     CPython 3.12（/usr/local，已 pip 安装全部依赖）作为内嵌运行时；
+#     启动器导出 PPTSAAS_PYTHON 指向它（app/backend/config.py: python_bin）。
+#   - 内嵌解释器二进制 rpath 指向 /usr/local/lib，启动器同时导出
+#     LD_LIBRARY_PATH=<pkg>/python/lib 完成重定位。
+# =============================================================================
+
+# 钉 bookworm（Debian 12, glibc 2.36）而非滚动 tag：python:3.12-slim 已切到
+# trixie（glibc 2.41），按滚动 tag 构建出的内嵌解释器在旧发行版上无法运行。
+FROM python:3.12-slim-bookworm AS build
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates binutils \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /repo
+
+# 可选 pip 镜像加速（国内网络）：--build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# ARG 变化会使依赖层缓存失效，CI（GitHub 可直连 PyPI）不要传。
+ARG PIP_INDEX_URL=""
+
+# ---- 依赖层（只 COPY requirements，最大化层缓存） --------------------------
+COPY skills/ppt-master/requirements.txt /tmp/req-skill.txt
+COPY app/backend/requirements.txt       /tmp/req-backend.txt
+RUN if [ -n "$PIP_INDEX_URL" ]; then pip config set global.index-url "$PIP_INDEX_URL"; fi \
+ && pip install --upgrade pip \
+ && pip install --retries 10 --timeout 120 \
+      -r /tmp/req-skill.txt -r /tmp/req-backend.txt pyinstaller
+
+# ---- 源码层 + PyInstaller onedir ------------------------------------------
+COPY app /repo/app
+COPY skills/ppt-master /repo/skills/ppt-master
+RUN pyinstaller app/packaging/pptsaas.spec \
+        --distpath dist --workpath build --noconfirm \
+ && test -x dist/pptsaas/pptsaas
+
+# ---- 组装发行目录 ----------------------------------------------------------
+FROM build AS assemble
+
+# 目录布局（tar.gz 与 AppImage 共用一套）：
+#   <root>/app/      PyInstaller onedir（pptsaas 二进制 + _internal）
+#   <root>/python/   内嵌 CPython 3.12（构建容器 /usr/local 整体拷贝）
+#   <root>/pptsaas.sh 启动器（仅 tar.gz 根目录；AppImage 用 AppRun）
+RUN set -eux; \
+    PKG=/pkg/pptsaas; \
+    mkdir -p "$PKG"; \
+    cp -a dist/pptsaas "$PKG/app"; \
+    mkdir -p "$PKG/python"; \
+    cp -a /usr/local/. "$PKG/python/"; \
+    # 精简：__pycache__ / 测试 / 文档，减小产物体积
+    find "$PKG/python" -type d -name __pycache__ -prune -exec rm -rf {} +; \
+    # 启动器
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -e' \
+      'HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"' \
+      'export PPTSAAS_PYTHON="$HERE/python/bin/python3.12"' \
+      'export LD_LIBRARY_PATH="$HERE/python/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' \
+      'export PPTSAAS_DATA_DIR="${PPTSAAS_DATA_DIR:-$HERE/data}"' \
+      'mkdir -p "$PPTSAAS_DATA_DIR"' \
+      'cd "$HERE"' \
+      'exec "$HERE/app/pptsaas" "$@"' \
+      > "$PKG/pptsaas.sh"; \
+    chmod +x "$PKG/pptsaas.sh"; \
+    # .env 模板
+    printf '%s\n' \
+      '# PPT Master Agent SaaS 配置（与 pptsaas.sh 同目录；不配 LLM key 为 mock 演示模式）' \
+      'PPTSAAS_LLM_BASE_URL=https://api.deepseek.com/v1' \
+      'PPTSAAS_LLM_API_KEY=' \
+      'PPTSAAS_LLM_MODEL=deepseek-chat' \
+      '# PEXELS_API_KEY=' \
+      '# PPTSAAS_HOST=127.0.0.1' \
+      '# PPTSAAS_PORT=8310' \
+      > "$PKG/.env.example"
+
+# ---- tar.gz ----------------------------------------------------------------
+RUN set -eux; \
+    mkdir -p /out; \
+    tar -czf /out/pptsaas-linux-x86_64.tar.gz -C /pkg pptsaas
+
+# ---- AppImage（appimagetool 可下载时；失败不阻塞 tar.gz） -------------------
+RUN set -eux; \
+    APPDIR=/AppDir; \
+    mkdir -p "$APPDIR/usr"; \
+    cp -a /pkg/pptsaas "$APPDIR/usr/pptsaas"; \
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'HERE="$(dirname "$(readlink -f "$0")")"' \
+      'export PPTSAAS_PYTHON="$HERE/usr/pptsaas/python/bin/python3.12"' \
+      'export LD_LIBRARY_PATH="$HERE/usr/pptsaas/python/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' \
+      'export PPTSAAS_DATA_DIR="${PPTSAAS_DATA_DIR:-$HOME/.local/share/pptsaas}"' \
+      'mkdir -p "$PPTSAAS_DATA_DIR"' \
+      'exec "$HERE/usr/pptsaas/app/pptsaas" "$@"' \
+      > "$APPDIR/AppRun"; \
+    chmod +x "$APPDIR/AppRun"; \
+    printf '%s\n' \
+      '[Desktop Entry]' \
+      'Type=Application' \
+      'Name=PPT Master Agent SaaS' \
+      'Comment=AI presentation generation service' \
+      'Exec=pptsaas' \
+      'Icon=pptsaas' \
+      'Categories=Office;' \
+      'Terminal=true' \
+      > "$APPDIR/pptsaas.desktop"; \
+    printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' \
+      | base64 -d > "$APPDIR/pptsaas.png"
+
+RUN set -ux; \
+    URL_MAIN="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"; \
+    URL_FALLBACK="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"; \
+    if curl -fL --retry 3 -o /tmp/appimagetool "$URL_MAIN" \
+    || curl -fL --retry 3 -o /tmp/appimagetool "$URL_FALLBACK"; then \
+      chmod +x /tmp/appimagetool; \
+      ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run \
+          /AppDir /out/pptsaas-x86_64.AppImage \
+      || echo "WARN: appimagetool 运行失败，跳过 AppImage"; \
+    else \
+      echo "WARN: appimagetool 下载失败，跳过 AppImage"; \
+    fi
+
+# 兜底：appimagetool 自身是 x86_64 ELF，在非 x86 宿主（如 Apple Silicon 上
+# QEMU/Rosetta 模拟 amd64）里可能 Exec format error。此时手工拼 AppImage：
+# type2 runtime ELF + mksquashfs 压缩的 AppDir（全程不执行 x86_64 二进制）。
+RUN set -ux; \
+    if [ ! -f /out/pptsaas-x86_64.AppImage ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends squashfs-tools \
+      && rm -rf /var/lib/apt/lists/* \
+      && curl -fL --retry 3 -o /tmp/runtime-x86_64 \
+          https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 \
+      && mksquashfs /AppDir /tmp/pptsaas.squashfs -root-owned -noappend -comp gzip \
+      && cat /tmp/runtime-x86_64 /tmp/pptsaas.squashfs > /out/pptsaas-x86_64.AppImage \
+      && chmod +x /out/pptsaas-x86_64.AppImage \
+      || echo "WARN: 手工 AppImage 打包失败，跳过 AppImage"; \
+    fi
+
+RUN cd /out && sha256sum * > SHA256SUMS.txt
+
+# ---- 导出层（--output type=local,dest=dist 只取这里的文件） -----------------
+FROM scratch AS export
+COPY --from=assemble /out/ /

@@ -12,6 +12,10 @@
 
 [English](./README.md) | 中文
 
+> **🚀 本分支 —— PPT Master Agent（SaaS 化版本）：** 本分支把 PPT Master 从"AI IDE 里的技能"升级为"可直接部署的 Web 应用"。上传 Markdown / Word / PDF / PPTX（或只输入一个主题）→ Agent 自动完成主题提取与专业大纲 → 你在页面上确认并调整（字体、主题模板、每页内容）→ 逐页生成并在线预览、在线修改 → 导出原生可编辑的 PPTX。内置多用户注册、管理员后台、按用户的 LLM token 配额与用量统计、主题模板、Pexels/Wikimedia 搜图配图，并支持打包成 Windows exe / Linux AppImage 单文件交付——模型也可部署在同一台机器上，整机直接对外提供服务。
+>
+> 快速上手：[`app/README.md`](app/README.md) · 架构与 API 契约：[`docs/saas/ARCHITECTURE.md`](docs/saas/ARCHITECTURE.md) · 部署/运维/规格手册：[`docs/zh/saas/`](docs/zh/saas/)
+
 <details open>
 <summary>本项目由 <a href="https://www.packyapi.com/register?aff=ppt-master">PackyCode</a>、<a href="https://apikey.fun/register?aff=PPT-MASTER">APIKEY.FUN</a>、<a href="https://runapi.co/register?aff=WMLJ">RunAPI</a>、<a href="https://www.compshare.cn/coding-plan?ytag=GPU_YY-git_pptmaster0624">优云智算</a> 等赞助方支持，得以持续免费开源。</summary>
 

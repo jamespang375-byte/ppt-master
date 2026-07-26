@@ -216,3 +216,6 @@ tmp/
 *.tmp
 .DS_Store
 */.DS_Store
+
+# PPT Master Agent SaaS 运行时数据（本地状态，不入库）
+/data/

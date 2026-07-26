@@ -12,6 +12,10 @@
 
 English | [中文](./README_CN.md)
 
+> **🚀 This branch — PPT Master Agent (SaaS edition):** this fork turns the PPT Master skill into a deployable web application. Upload Markdown / Word / PDF / PPTX (or just type a topic) → the agent extracts themes and drafts a professional outline → you confirm and tweak it (fonts, theme, per-page content) → pages are generated with live online preview and per-page editing → export a natively editable PPTX. It ships with multi-user registration, an admin console, per-user LLM token quotas, built-in themes, Pexels/Wikimedia image search, and one-file packaging targets (Windows exe / Linux AppImage) so a small team can self-host the whole stack — model included — on a single machine.
+>
+> Get started: [`app/README.md`](app/README.md) · Architecture & API contract: [`docs/saas/ARCHITECTURE.md`](docs/saas/ARCHITECTURE.md) · 中文手册（部署/运维/规格）: [`docs/zh/saas/`](docs/zh/saas/)
+
 <details open>
 <summary>This project is kept free and open source with the support of <a href="https://www.packyapi.com/register?aff=ppt-master">PackyCode</a>, <a href="https://apikey.fun/register?aff=PPT-MASTER">APIKEY.FUN</a>, <a href="https://runapi.co/register?aff=WMLJ">RunAPI</a>, <a href="https://www.compshare.cn/coding-plan?ytag=GPU_YY-git_pptmaster0624">YouYun ZhiSuan</a> and other sponsors.</summary>
 
