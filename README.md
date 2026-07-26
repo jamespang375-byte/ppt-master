@@ -12,9 +12,52 @@
 
 English | [中文](./README_CN.md)
 
-> **🚀 This branch — PPT Master Agent (SaaS edition):** this fork turns the PPT Master skill into a deployable web application. Upload Markdown / Word / PDF / PPTX (or just type a topic) → the agent extracts themes and drafts a professional outline → you confirm and tweak it (fonts, theme, per-page content) → pages are generated with live online preview and per-page editing → export a natively editable PPTX. It ships with multi-user registration, an admin console, per-user LLM token quotas, built-in themes, Pexels/Wikimedia image search, and one-file packaging targets (Windows exe / Linux AppImage) so a small team can self-host the whole stack — model included — on a single machine.
->
-> Get started: [`app/README.md`](app/README.md) · Architecture & API contract: [`docs/saas/ARCHITECTURE.md`](docs/saas/ARCHITECTURE.md) · 中文手册（部署/运维/规格）: [`docs/zh/saas/`](docs/zh/saas/)
+---
+
+## 🚀 This branch: PPT Master Agent — the skill, rebuilt as a product
+
+This fork takes the original **PPT Master skill** (an AI-IDE workflow that
+requires Claude Code / Cursor and prompt-driving) and rebuilds it as a
+**self-hostable web application** — so anyone on the team can generate decks
+from a browser, with no IDE, no prompt skills, and nothing to install but a
+single package. It also incorporates hard-won lessons from our **MYGEM**
+project's PPT Agent (fixed pipeline, small-model-friendly JSON contracts,
+Pexels/Wikimedia image acquisition, per-page regeneration).
+
+**What changed vs. the skill**
+
+- **Fixed pipeline, no prompt-driving** — upload Markdown / Word / PDF / PPTX
+  (or paste a long brief, up to ~100k chars) → LLM drafts the outline → you
+  confirm/edit it in the browser → pages generate concurrently with web
+  images (Pexels/Pixabay/Wikimedia/Openverse, admin-selectable) → export a
+  natively editable PPTX. The heavy lifting still delegates to the original
+  `skills/ppt-master` scripts; the LLM only does outlining and per-page
+  authoring, so DeepSeek-class small models produce good results.
+- **22 visual themes** — the repo's own asset library, productized: 5 brand
+  specs (Anthropic / Doubao / Google / Huawei / Doubao×Huawei-red), 5
+  institutional decks (China Telecom / China Power Construction / CATARC /
+  CMB / Chongqing University), 7 layout styles, 5 generic — grouped in a
+  visual picker. Density is enforced (≥20 visual elements per content page,
+  native SVG charts), not "a title with three lines".
+- **Online preview & editing** — per-page live preview, click-to-edit text
+  directly on the slide, per-page regeneration with feedback, raw-SVG mode,
+  go back to any wizard step and regenerate.
+- **Share links** — one click creates a login-free, read-only flip-through
+  link for any deck (revocable).
+- **SaaS basics** — multi-user registration (first user = admin), per-user
+  LLM token quotas and metering, admin console, runtime settings UI for the
+  model endpoint and image-search keys (masked, override env without
+  restart), embedded "how to get an API key" guides.
+- **One-file distribution** — Windows exe (zip) and Linux AppImage/tar.gz
+  with an embedded Python runtime, built and smoke-tested on real OS runners
+  by CI. Works with any OpenAI-compatible endpoint — cloud
+  (DeepSeek/GLM/Qwen) or a co-located local model (Ollama/llama.cpp/vLLM) —
+  and includes a mock demo mode that needs no key at all.
+
+**Get it**: [⬇ Releases (Windows/Linux)](https://github.com/jamespang375-byte/ppt-master/releases) ·
+[Quickstart](app/README.md) · [Demo video (5:45)](docs/saas/demo/ppt-master-agent-demo.mp4) ·
+[Architecture & API contract](docs/saas/ARCHITECTURE.md) ·
+[中文手册：部署 / 运维 / 规格 / API 获取](docs/zh/saas/)
 
 <details open>
 <summary>This project is kept free and open source with the support of <a href="https://www.packyapi.com/register?aff=ppt-master">PackyCode</a>, <a href="https://apikey.fun/register?aff=PPT-MASTER">APIKEY.FUN</a>, <a href="https://runapi.co/register?aff=WMLJ">RunAPI</a>, <a href="https://www.compshare.cn/coding-plan?ytag=GPU_YY-git_pptmaster0624">YouYun ZhiSuan</a> and other sponsors.</summary>

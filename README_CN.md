@@ -12,9 +12,25 @@
 
 [English](./README.md) | 中文
 
-> **🚀 本分支 —— PPT Master Agent（SaaS 化版本）：** 本分支把 PPT Master 从"AI IDE 里的技能"升级为"可直接部署的 Web 应用"。上传 Markdown / Word / PDF / PPTX（或只输入一个主题）→ Agent 自动完成主题提取与专业大纲 → 你在页面上确认并调整（字体、主题模板、每页内容）→ 逐页生成并在线预览、在线修改 → 导出原生可编辑的 PPTX。内置多用户注册、管理员后台、按用户的 LLM token 配额与用量统计、主题模板、Pexels/Wikimedia 搜图配图，并支持打包成 Windows exe / Linux AppImage 单文件交付——模型也可部署在同一台机器上，整机直接对外提供服务。
->
-> 快速上手：[`app/README.md`](app/README.md) · 架构与 API 契约：[`docs/saas/ARCHITECTURE.md`](docs/saas/ARCHITECTURE.md) · 部署/运维/规格手册：[`docs/zh/saas/`](docs/zh/saas/)
+---
+
+## 🚀 本分支：PPT Master Agent —— 把技能重做成了产品
+
+本分支把原版 **PPT Master 技能**（依赖 Claude Code / Cursor 等 AI IDE、需要会写提示词驱动的工作流）重构成一个**可自部署的 Web 应用**——团队里任何人打开浏览器就能生成 PPT：不需要 IDE、不需要提示词技巧、只需要装一个包。同时吸收了我们在 **MYGEM** 项目 PPT Agent 中验证过的经验（固定管线、对小模型友好的 JSON 契约、Pexels/Wikimedia 搜图配图、单页重生成）。
+
+**相对原版技能的改动**
+
+- **固定管线，告别提示词驱动**——上传 Markdown / Word / PDF / PPTX（或直接粘贴最长 10 万字的详细提示词）→ LLM 自动完成主题提取与专业大纲 → 你在浏览器里确认/修改 → 多页并发生成并自动配图（Pexels/Pixabay/Wikimedia/Openverse，管理员可选图源）→ 导出原生可编辑的 PPTX。重活仍复用原版 `skills/ppt-master` 脚本，LLM 只负责大纲和逐页创作，DeepSeek 级别的小模型即可产出高质量结果。
+- **22 套视觉主题**——把仓库自有资产产品化：5 个品牌规范（Anthropic / 豆包 / Google / 华为 / 豆包×华为红）、5 个机构模板（中国电信 / 中国电建 / 中汽研 / 招商银行 / 重庆大学）、7 个版式风格、5 个通用主题，分组卡片式选择。内容密度有硬约束（内容页 ≥20 个视觉元素、原生 SVG 图表），拒绝"标题+三行字"的稀薄页。
+- **在线预览与编辑**——逐页实时预览、点击页面文字直接修改、按反馈单页重生成、SVG 源码模式、任意步骤可回退重新生成。
+- **分享链接**——一键生成免登录的只读翻页链接，把 deck 发给任何人在线看（可随时撤销）。
+- **SaaS 基础能力**——多用户注册（首个用户即管理员）、按用户的 LLM token 配额与用量统计、管理后台、模型与搜图 key 的设置界面（脱敏显示、改完即生效、覆盖环境变量）、内嵌"API key 怎么申请"引导。
+- **单文件分发**——Windows exe（zip）与 Linux AppImage/tar.gz，内嵌 Python 运行时，CI 在真实 Windows/Linux 环境构建并冒烟。模型可用任何 OpenAI 兼容端点——云端（DeepSeek/GLM/通义）或同机部署的本地模型（Ollama/llama.cpp/vLLM）——不配 key 也有 mock 演示模式可跑通全流程。
+
+**获取**：[⬇ Releases 下载（Windows/Linux）](https://github.com/jamespang375-byte/ppt-master/releases) ·
+[快速上手](app/README.md) · [演示视频（5 分 45 秒）](docs/saas/demo/ppt-master-agent-demo.mp4) ·
+[架构与 API 契约](docs/saas/ARCHITECTURE.md) ·
+[中文手册：部署 / 运维 / 规格 / API 获取指南](docs/zh/saas/)
 
 <details open>
 <summary>本项目由 <a href="https://www.packyapi.com/register?aff=ppt-master">PackyCode</a>、<a href="https://apikey.fun/register?aff=PPT-MASTER">APIKEY.FUN</a>、<a href="https://runapi.co/register?aff=WMLJ">RunAPI</a>、<a href="https://www.compshare.cn/coding-plan?ytag=GPU_YY-git_pptmaster0624">优云智算</a> 等赞助方支持，得以持续免费开源。</summary>
