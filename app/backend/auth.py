@@ -66,7 +66,9 @@ def _extract_token(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[len("Bearer "):].strip()
-    return ""
+    # Resource loads from inline SVG <image href> can't set headers, so
+    # image URLs carry the session token as a query parameter instead.
+    return (request.query_params.get("token") or "").strip()
 
 
 def current_user(request: Request, db: Database = Depends(get_db)) -> dict:

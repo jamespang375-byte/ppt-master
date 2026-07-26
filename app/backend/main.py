@@ -533,10 +533,22 @@ async def regenerate_page(project_id: str, page_number: int,
         " DO UPDATE SET status = 'done', error = NULL",
         (project_id, page_number),
     )
-    return {"svg": svg}
+    return {"svg": _svg_with_image_urls(svg, project_id, user["_token"])}
 
 
 _HREF_RE = re.compile(r'(xlink:href|href)="images/')
+
+
+def _svg_with_image_urls(svg: str, project_id: str, token: str) -> str:
+    """Rewrite relative image hrefs to the authed image endpoint.
+
+    Inline SVG loads images without Authorization headers, so the session
+    token rides along as a query param (see auth._extract_token).
+    """
+    svg = _HREF_RE.sub(rf'\1="/api/projects/{project_id}/images/', svg)
+    return re.sub(
+        rf'(/api/projects/{project_id}/images/[^"]+?)(")',
+        rf'\1?token={token}\2', svg)
 
 
 @app.get("/api/projects/{project_id}/pages/{page_number}/svg")
@@ -549,7 +561,7 @@ def get_page_svg(project_id: str, page_number: int, request: Request,
     if not path.is_file():
         raise HTTPException(404, "svg not generated yet")
     svg = path.read_text(encoding="utf-8")
-    svg = _HREF_RE.sub(rf'\1="/api/projects/{project_id}/images/', svg)
+    svg = _svg_with_image_urls(svg, project_id, user["_token"])
     return Response(content=svg, media_type="image/svg+xml")
 
 
@@ -564,6 +576,11 @@ async def put_page_svg(project_id: str, page_number: int, request: Request,
     text = body.decode("utf-8", "replace")
     if "<svg" not in text or "</svg>" not in text:
         raise HTTPException(400, "body must be a complete SVG document")
+    # The on-screen SVG carries rewritten authed URLs; normalize back to the
+    # relative form the exporter and re-serving expect.
+    text = re.sub(
+        rf'/api/projects/{project_id}/images/([^"?]+)\?token=[^"]+',
+        r'images/\1', text)
     write_page_svg(project_dir(settings, project_id), page_number, text)
     db.execute(
         "INSERT INTO pages(project_id, page_number, status, error)"
