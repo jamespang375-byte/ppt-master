@@ -12,6 +12,7 @@ Dependencies:
 import json
 import mimetypes
 import re
+import secrets
 import shutil
 import time
 from pathlib import Path
@@ -172,13 +173,14 @@ def list_themes(request: Request,
                 user: dict = Depends(current_user)) -> list[dict]:
     rows = request.app.state.db.query(
         "SELECT id, name, builtin, owner_id, style_md, description, palette,"
-        " created_at FROM themes ORDER BY builtin DESC, id"
+        " category, created_at FROM themes ORDER BY builtin DESC, id"
     )
     return [{
         "id": r["id"],
         "name": r["name"],
         "builtin": bool(r["builtin"]),
         "owner_id": r["owner_id"],
+        "category": r["category"] or "generic",
         "description": r["description"] or "",
         "palette": _palette_list(r["palette"]),
         "summary": (r["style_md"] or "")[:200],
@@ -615,6 +617,80 @@ def get_project_image(project_id: str, name: str, request: Request,
 
 
 # ---------------------------------------------------------------------------
+# Share links (public, no auth; owners manage tokens per project)
+# ---------------------------------------------------------------------------
+
+def _get_shared_project(db: Database, token: str) -> dict:
+    row = db.query_one("SELECT * FROM projects WHERE share_token = ?", (token,))
+    if not row:
+        raise HTTPException(404, "share link not found or revoked")
+    return row
+
+
+@app.post("/api/projects/{project_id}/share")
+def create_share(project_id: str, request: Request,
+                 user: dict = Depends(current_user)) -> dict:
+    db = request.app.state.db
+    row = _get_project(db, project_id, user)
+    token = row["share_token"]
+    if not token:
+        token = secrets.token_urlsafe(12)
+        db.execute("UPDATE projects SET share_token = ? WHERE id = ?",
+                   (token, project_id))
+    return {"share_url": "/share/" + token}
+
+
+@app.delete("/api/projects/{project_id}/share")
+def revoke_share(project_id: str, request: Request,
+                 user: dict = Depends(current_user)) -> dict:
+    db = request.app.state.db
+    _get_project(db, project_id, user)
+    db.execute("UPDATE projects SET share_token = NULL WHERE id = ?",
+               (project_id,))
+    return {"ok": True}
+
+
+@app.get("/api/share/{token}")
+def share_meta(token: str, request: Request) -> dict:
+    settings, db = _settings(request), request.app.state.db
+    row = _get_shared_project(db, token)
+    svg_dir = project_dir(settings, row["id"]) / "svg_output"
+    page_count = len(list(svg_dir.glob("*.svg"))) if svg_dir.is_dir() else 0
+    theme = db.query_one("SELECT name FROM themes WHERE id = ?",
+                         (row["theme_id"],))
+    return {
+        "title": row["title"],
+        "page_count": page_count,
+        "theme_name": (theme or {}).get("name") or "",
+    }
+
+
+@app.get("/api/share/{token}/pages/{page_number}")
+def share_page_svg(token: str, page_number: int, request: Request) -> Response:
+    settings, db = _settings(request), request.app.state.db
+    row = _get_shared_project(db, token)
+    path = (project_dir(settings, row["id"]) / "svg_output"
+            / f"page_{page_number:02d}.svg")
+    if not path.is_file():
+        raise HTTPException(404, "project not finished exporting yet")
+    svg = path.read_text(encoding="utf-8")
+    svg = _HREF_RE.sub(rf'\1="/api/share/{token}/images/', svg)
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/share/{token}/images/{name}")
+def share_image(token: str, name: str, request: Request) -> FileResponse:
+    settings, db = _settings(request), request.app.state.db
+    row = _get_shared_project(db, token)
+    safe = sanitize_filename(name)
+    path = project_dir(settings, row["id"]) / "images" / safe
+    if not path.is_file():
+        raise HTTPException(404, "image not found")
+    media = mimetypes.guess_type(safe)[0] or "application/octet-stream"
+    return FileResponse(str(path), media_type=media)
+
+
+# ---------------------------------------------------------------------------
 # Usage & admin
 # ---------------------------------------------------------------------------
 
@@ -789,6 +865,15 @@ def index() -> Any:
     if index_path.is_file():
         return FileResponse(str(index_path))
     return {"service": "ppt-master-saas", "frontend": "not installed"}
+
+
+@app.get("/share/{token}")
+def share_page(token: str) -> Any:
+    """Public read-only deck viewer (self-contained, no login required)."""
+    share_path = FRONTEND_DIR / "share.html"
+    if share_path.is_file():
+        return FileResponse(str(share_path))
+    raise HTTPException(404, "share page not installed")
 
 
 if FRONTEND_DIR.is_dir():

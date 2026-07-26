@@ -2,12 +2,13 @@
 """
 PPT Master SaaS - Builtin theme seeds
 
-Five hand-written generic themes plus brand themes scanned from the PPT
-Master skill's brand design_spec files, all seeded at startup
+Five hand-written generic themes plus themes scanned from the PPT Master
+skill's template assets — brand design_spec files, deck (full-organization)
+styles, and layout (structure-only) styles — all seeded at startup
 (idempotent, keyed by name). Each theme is a ``style_md`` block injected
-verbatim into the executor system prompt. ``MOCK_COLORS`` gives the mock
-executor a palette per theme so the no-LLM pipeline still renders
-on-theme SVGs.
+verbatim into the executor system prompt; ``category`` marks its origin
+(generic|brand|deck|layout). ``MOCK_COLORS`` gives the mock executor a
+palette per theme so the no-LLM pipeline still renders on-theme SVGs.
 
 See docs/saas/ARCHITECTURE.md §5.
 
@@ -183,6 +184,117 @@ BRAND_THEME_DESCRIPTIONS: dict[str, str] = {
     "豆包×华为红": "豆包风格 × 华为红 —— 浅色底 + 华为红标题 + 三色协奏，高信息密度的中式商务风。",
 }
 
+# ---------------------------------------------------------------------------
+# Deck themes (kind=deck, full organization styles) and layout themes
+# (kind=layout, structure-only) scanned from the skill's template indexes.
+# ---------------------------------------------------------------------------
+
+# Chinese one-liners for deck themes; decks_index.json summaries are English
+# for most entries. Keyed by the friendly Chinese name (= index id).
+DECK_THEME_DESCRIPTIONS: dict[str, str] = {
+    "中国电信": "中国电信机构风 —— 电信红主色，适合政企数字化方案、转型规划与内部汇报。",
+    "中国电建": "中国电建工程风 —— 工程蓝主色，适合工程项目报告、技术方案与年度总结。",
+    "中汽研": "中汽研检测认证风 —— 深蓝主色，适合产品认证展示、测评汇报与技术推介。",
+    "招商银行": "招商银行品牌风 —— 招行红主色，适合交易银行方案汇报、客户案例拆解与分行培训。",
+    "重庆大学": "重庆大学学术风 —— 重大蓝主色，适合学术答辩、科研报告与教学演示。",
+}
+
+# layouts/<id>/ → friendly Chinese theme name.
+LAYOUT_THEME_NAMES: dict[str, str] = {
+    "academic_defense": "学术答辩",
+    "ai_ops": "电信AI运维",
+    "government_blue": "政务蓝",
+    "government_red": "政务红",
+    "medical_university": "医学院",
+    "pixel_retro": "像素复古",
+    "psychology_attachment": "心理学",
+}
+
+# Chinese one-liners for layout themes; layouts_index.json summaries are English.
+LAYOUT_THEME_DESCRIPTIONS: dict[str, str] = {
+    "academic_defense": "学术答辩版式 —— 论文答辩、学术汇报、研究进展与基金申请结构。",
+    "ai_ops": "电信AI运维版式 —— 运维架构、IT 系统总览、数字化转型方案结构。",
+    "government_blue": "政务蓝版式 —— 重点项目汇报、五年规划、工作总结与政策解读结构。",
+    "government_red": "政务红版式 —— 政府简报、政策解读、工作总结与项目推介结构。",
+    "medical_university": "医学院版式 —— 医学学术报告、病例讨论、医院工作报告与教学培训结构。",
+    "pixel_retro": "像素复古版式 —— 技术分享、编程教程、游戏介绍与极客风展示结构。",
+    "psychology_attachment": "心理学版式 —— 心理治疗培训、学术讲座、咨询案例分析与专业分享结构。",
+}
+
+# Appended to structure-only layout specs: they carry no color/font rules.
+_LAYOUT_COLOR_NOTE = "配色与字体由你按主题气质自由设计，保持全 deck 统一。"
+
+
+def _read_index(skill_dir: Path, kind: str) -> dict:
+    """Parse templates/<kind>s/<kind>s_index.json; {} when missing/invalid."""
+    index_path = skill_dir / "templates" / f"{kind}s" / f"{kind}s_index.json"
+    if not index_path.is_file():
+        return {}
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_deck_themes(skill_dir: Optional[Path]) -> list[dict[str, str]]:
+    """Scan decks/decks_index.json → one theme per deck directory.
+
+    style_md = the deck's design_spec.md; palette = the index's
+    primary_color followed by hex colors found in the spec.
+    """
+    if not skill_dir:
+        return []
+    themes = []
+    for deck_id, meta in _read_index(skill_dir, "deck").items():
+        spec_path = skill_dir / "templates" / "decks" / deck_id / "design_spec.md"
+        if not spec_path.is_file():
+            continue
+        style_md = spec_path.read_text(encoding="utf-8")
+        primary = str((meta or {}).get("primary_color") or "").upper()
+        palette = extract_palette(style_md)
+        if _HEX_RE.fullmatch(primary) and primary not in palette:
+            palette.insert(0, primary)
+        name = deck_id  # index ids are already friendly Chinese names
+        themes.append({
+            "name": name,
+            "style_md": style_md,
+            "description": (DECK_THEME_DESCRIPTIONS.get(name)
+                            or str((meta or {}).get("summary") or "")),
+            "palette": json.dumps(palette[:5], ensure_ascii=False),
+            "category": "deck",
+        })
+    return themes
+
+
+def load_layout_themes(skill_dir: Optional[Path]) -> list[dict[str, str]]:
+    """Scan layouts/layouts_index.json → one theme per layout directory.
+
+    Layouts are structure-only (no color spec), so a note is appended
+    telling the executor to design a consistent palette itself; palette is
+    whatever hex colors the spec happens to mention (often none).
+    """
+    if not skill_dir:
+        return []
+    themes = []
+    for layout_id, meta in _read_index(skill_dir, "layout").items():
+        spec_path = (skill_dir / "templates" / "layouts" / layout_id
+                     / "design_spec.md")
+        if not spec_path.is_file():
+            continue
+        style_md = (spec_path.read_text(encoding="utf-8").rstrip()
+                    + "\n\n" + _LAYOUT_COLOR_NOTE + "\n")
+        themes.append({
+            "name": LAYOUT_THEME_NAMES.get(layout_id, layout_id),
+            "style_md": style_md,
+            "description": (LAYOUT_THEME_DESCRIPTIONS.get(layout_id)
+                            or str((meta or {}).get("summary") or "")),
+            "palette": json.dumps(extract_palette(style_md),
+                                  ensure_ascii=False),
+            "category": "layout",
+        })
+    return themes
+
 _HEX_RE = re.compile(r"#[0-9A-Fa-f]{6}\b")
 
 
@@ -252,6 +364,7 @@ def load_brand_themes(skill_dir: Optional[Path]) -> list[dict[str, str]]:
             "description": description,
             "palette": json.dumps(extract_palette(style_md),
                                   ensure_ascii=False),
+            "category": "brand",
         })
     return themes
 
@@ -267,9 +380,11 @@ def seed_builtin_themes(db, skill_dir: Optional[Path] = None) -> None:
             "description": _first_paragraph(theme["style_md"]),
             "palette": json.dumps(extract_palette(theme["style_md"]),
                                   ensure_ascii=False),
+            "category": "generic",
         }
         for theme in BUILTIN_THEMES
-    ] + load_brand_themes(skill_dir)
+    ] + load_brand_themes(skill_dir) + load_deck_themes(skill_dir) \
+        + load_layout_themes(skill_dir)
 
     for theme in themes:
         existing = db.query_one(
@@ -277,16 +392,16 @@ def seed_builtin_themes(db, skill_dir: Optional[Path] = None) -> None:
         )
         if existing:
             db.execute(
-                "UPDATE themes SET style_md = ?, description = ?, palette = ?"
-                " WHERE id = ?",
+                "UPDATE themes SET style_md = ?, description = ?, palette = ?,"
+                " category = ? WHERE id = ?",
                 (theme["style_md"], theme["description"], theme["palette"],
-                 existing["id"]),
+                 theme["category"], existing["id"]),
             )
         else:
             db.execute(
                 "INSERT INTO themes(name, builtin, owner_id, style_md,"
-                " description, palette, created_at)"
-                " VALUES (?, 1, NULL, ?, ?, ?, ?)",
+                " description, palette, category, created_at)"
+                " VALUES (?, 1, NULL, ?, ?, ?, ?, ?)",
                 (theme["name"], theme["style_md"], theme["description"],
-                 theme["palette"], utcnow()),
+                 theme["palette"], theme["category"], utcnow()),
             )

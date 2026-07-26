@@ -35,7 +35,10 @@ from .prompts import (
     strategist_user,
 )
 
-MAX_SOURCES_EXCERPT = 24_000
+# Strategist receives at most this many chars of source material. Long-prompt
+# users paste up to ~100k chars; qwen3.7-max (1M ctx) handles it, smaller
+# contexts (deepseek-chat 128k) need shorter inputs — surface, don't crash.
+MAX_SOURCES_EXCERPT = 200_000
 
 
 class PipelineError(Exception):
@@ -178,6 +181,8 @@ def validate_outline(data: Any) -> dict[str, Any]:
             "content_summary": str(raw.get("content_summary") or ""),
             "visual_suggestion": str(raw.get("visual_suggestion") or ""),
             "image_query": str(raw.get("image_query") or ""),
+            # Optional new contract field; tolerate its absence.
+            "chart_hint": str(raw.get("chart_hint") or "")[:120],
             "layout_hint": layout if layout in _LAYOUT_HINTS else "content",
             "bullets": [str(b) for b in (raw.get("bullets") or [])][:8]
             if isinstance(raw.get("bullets"), list) else [],
@@ -394,6 +399,20 @@ async def generate_project(settings: Settings, db: Database, llm: LLMClient,
         )
         style_md = (theme_row or {}).get("style_md") or ""
         theme_name = (theme_row or {}).get("name") or ""
+
+        # Deck themes reference bundled assets (logo_white.png, cover_bg.png
+        # …) from their template directory; copy them into the project's
+        # images/ so executor hrefs resolve and export can embed them.
+        deck_dir = (settings.skill_dir / "templates" / "decks" / theme_name
+                    if theme_name else None)
+        if deck_dir and deck_dir.is_dir():
+            assets_dir = proj_dir / "images"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            for asset in deck_dir.iterdir():
+                if asset.suffix.lower() in (".png", ".jpg", ".jpeg"):
+                    dest = assets_dir / asset.name
+                    if not dest.exists():
+                        shutil.copy2(asset, dest)
 
         try:
             CURRENT_STAGE[project_id] = "images"

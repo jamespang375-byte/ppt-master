@@ -114,6 +114,7 @@ projects(id TEXT PK,                      -- uuid hex 12
          user_id INTEGER, title TEXT, status TEXT,   -- draft|outline|confirmed|generating|ready|exported|failed
          theme_id INTEGER, slide_count INTEGER, style_brief TEXT,
          outline_json TEXT, error TEXT, pptx_path TEXT,
+         share_token TEXT,                -- public share link token (NULL = not shared)
          created_at TEXT, updated_at TEXT)
 pages(project_id TEXT, page_number INTEGER, status TEXT,  -- pending|generating|done|failed
       error TEXT, PRIMARY KEY(project_id, page_number))
@@ -122,6 +123,7 @@ token_usage(id INTEGER PK, user_id INTEGER, project_id TEXT, stage TEXT,
             total_tokens INTEGER, created_at TEXT)
 themes(id INTEGER PK, name TEXT, builtin INTEGER DEFAULT 0, owner_id INTEGER,
        style_md TEXT, description TEXT, palette TEXT,  -- palette = JSON array of hex colors
+       category TEXT,                     -- generic|brand|deck|layout
        created_at TEXT)
 settings(k TEXT PRIMARY KEY, v TEXT)   -- admin runtime overrides, see §3
 ```
@@ -131,9 +133,20 @@ Sessions: `secrets.token_urlsafe(32)`, Bearer header `Authorization: Bearer <tok
 
 ## 5. Themes
 
-Builtin themes seeded at startup (idempotent), each a `style_md` block
-(palette hex codes, font stack, background, card/divider rules, do/don't)
-injected verbatim into the executor system prompt:
+Builtin themes are seeded at startup (idempotent, keyed by name), each a
+`style_md` block (palette hex codes, font stack, background, card/divider
+rules, do/don't) injected verbatim into the executor system prompt. 22
+builtins in four categories (`category` column, returned by
+`GET /api/themes`):
+
+| category | count | source | themes |
+|---|---|---|---|
+| `generic` | 5 | hand-written in `themes.py` | 商务蓝, 科技暗色, 咨询红, 护眼绿, 极简白 |
+| `brand` | 5 | `templates/brands/*/design_spec.md` + `templates/brand-doubao-huawei/` | Anthropic, 豆包风格, Google, 华为品牌, 豆包×华为红 |
+| `deck` | 5 | `templates/decks/decks_index.json` + each deck's `design_spec.md` | 中国电信, 中国电建, 中汽研, 招商银行, 重庆大学 |
+| `layout` | 7 | `templates/layouts/layouts_index.json` + each layout's `design_spec.md` | 学术答辩, 电信AI运维, 政务蓝, 政务红, 医学院, 像素复古, 心理学 |
+
+The five hand-written generic themes:
 
 | key | name | vibe |
 |---|---|---|
@@ -144,15 +157,18 @@ injected verbatim into the executor system prompt:
 | `minimal-white` | 极简白 | near-white, single accent |
 
 Users with any role may create custom themes (owner-scoped + visible to all
-in v1 — keep it simple).
+in v1 — keep it simple; custom themes report `category` as `generic`).
 
-In addition, brand themes are seeded from the skill's brand design specs
-(`skills/ppt-master/templates/brands/{anthropic,doubao,google,huawei}/design_spec.md`
-and `templates/brand-doubao-huawei/design_spec.md`): friendly Chinese names
-(e.g. 豆包风格, 华为品牌, 豆包×华为红), full `style_md` = file content,
-`description` from frontmatter summary (or first heading), `palette` = first
-5 unique `#RRGGBB` values. `GET /api/themes` and `GET /api/themes/{id}`
-return `description` and `palette` (array).
+Scanned themes (brand/deck/layout) use friendly Chinese names, full
+`style_md` = file content, `description` from a Chinese mapping table in
+`themes.py` (falling back to the index/frontmatter summary), and `palette`
+= up to 5 unique `#RRGGBB` values (decks: the index's `primary_color`
+first, then spec hexes). Layouts are structure-only (no color spec), so a
+note is appended to their `style_md` telling the executor to design a
+consistent palette itself, and their `palette` is whatever hexes the spec
+mentions (possibly empty — the frontend has a fallback).
+`GET /api/themes` and `GET /api/themes/{id}` return `category`,
+`description` and `palette` (array).
 
 ## 6. LLM prompting
 
@@ -163,12 +179,25 @@ return `description` and `palette` (array).
   ```json
   {"deck_title":"…","pages":[{"page_number":1,"title":"…","key_message":"…",
    "content_summary":"…(300-800字)…","visual_suggestion":"…",
-   "image_query":"2-5 english keywords or empty","layout_hint":"cover|toc|content|data|closing",
+   "image_query":"2-5 english keywords or empty",
+   "chart_hint":"optional, e.g. 'bar: 2022-2026 市场规模'",
+   "layout_hint":"cover|toc|content|data|closing",
    "bullets":["…","…"]}]}
   ```
+  Density rules: content pages must carry structured elements (data points /
+  comparisons / steps / lists) in `content_summary`; page types must vary
+  across the deck (KPI big-number, table, timeline, comparison, process — at
+  least 2 kinds); `chart_hint` is optional and tolerated by outline
+  validation.
 - **Executor per page** (temp 0.3, max_tokens 16384):
-  system = theme.style_md + condensed SVG rules (see below) + "output ONLY
-  the SVG"; user = deck context + this page's outline JSON + available image
+  system = theme.style_md + condensed SVG rules (see below) + layout pattern
+  catalog (~14 patterns: centered/left-text cover, toc grid, chapter
+  divider, KPI big-number cards, card grids, image-text splits, comparison
+  columns, table, timeline, process arrows, pyramid, quote, closing) +
+  density floor (content pages ≥20 visual elements, no sparse
+  "title + 3 lines" pages, data pages should draw native
+  rect/polyline/circle charts, honoring `chart_hint`) + "output ONLY the
+  SVG"; user = deck context + this page's outline JSON + available image
   filenames (if any) with `images/<file>` hrefs + user feedback when
   regenerating. Output: one `<svg viewBox="0 0 1280 720">…</svg>`.
 - **Condensed SVG rules** (distilled from
@@ -194,7 +223,7 @@ return `description` and `palette` (array).
 - `GET  /api/auth/me` → `{user, token_used, token_quota}`
 
 ### Themes
-- `GET  /api/themes` → `[{id, key|name, builtin, style_md?summary}]`
+- `GET  /api/themes` → `[{id, key|name, builtin, category, description, palette, summary}]` (`category` = generic|brand|deck|layout)
 - `POST /api/themes` `{name, style_md}` → theme (custom)
 - `GET  /api/themes/{id}` → full incl. `style_md`
 
@@ -214,6 +243,14 @@ return `description` and `palette` (array).
 - `POST /api/projects/{id}/export` → re-run svg_to_pptx → `{pptx_ready:true}`
 - `GET  /api/projects/{id}/download` → `application/vnd…presentation` file
 - `GET  /api/projects/{id}/images/{name}` → image file (for SVG preview rendering)
+
+### Share links (public, no auth)
+- `POST /api/projects/{id}/share` (owner) → idempotent `{"share_url": "/share/<token>"}` (`secrets.token_urlsafe(12)`)
+- `DELETE /api/projects/{id}/share` (owner) → revoke (token set to NULL)
+- `GET  /api/share/{token}` → `{"title", "page_count", "theme_name"}`; 404 when unknown/revoked
+- `GET  /api/share/{token}/pages/{n}` → `image/svg+xml` with `images/…` hrefs rewritten to `/api/share/{token}/images/…`; 404 until the project has SVG output
+- `GET  /api/share/{token}/images/{name}` → image file
+- `GET  /share/{token}` → `app/frontend/share.html` (self-contained read-only viewer)
 
 ### Usage & admin
 - `GET /api/usage` → caller's totals + per-project breakdown + recent records

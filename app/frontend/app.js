@@ -61,7 +61,9 @@
     zap: ico('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>', 14),
     layers: ico('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>', 14),
     edit: ico('<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/>', 14),
-    save: ico('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', 14)
+    save: ico('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', 14),
+    share: ico('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>', 14),
+    link: ico('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>', 14)
   };
   /* layout hint icons (16px) */
   var LAYOUT_ICONS = {
@@ -754,10 +756,10 @@
             '<div class="file-list" id="file-list"></div>' +
           '</div>' +
           '<div id="tab-topic"' + (w.inputMode !== 'topic' ? ' class="hidden"' : '') + '>' +
-            '<div class="field" style="margin-bottom:4px"><label>演示提示词<span class="opt">当前版本无联网检索，提示词越详细（背景、受众、核心观点、关键数据、章节偏好），大纲越准确</span></label>' +
+            '<div class="field" style="margin-bottom:4px"><label>演示提示词<span class="opt">当前版本无联网检索，提示词越详细（背景、受众、核心观点、关键数据、章节偏好），大纲越准确（支持粘贴最长 10 万字的长文）</span></label>' +
             '<textarea id="topic-text" rows="7" placeholder="例如：面向公司管理层的 2026 年新能源汽车行业趋势汇报。受众为投资委员会，重点关注市场规模与增速、竞争格局、政策走向三方面；核心观点是“插混增速首次超过纯电”；请包含 2023–2025 年销量数据、主要厂商份额对比，并设独立章节讨论出海机会与风险。">' +
             esc(w.topic) + '</textarea>' +
-            '<div class="char-count" id="topic-count">已输入 0 字 · 建议 50–20000 字，长提示词效果更好</div></div>' +
+            '<div class="char-count" id="topic-count">已输入 0 字 · 支持最长 10 万字，内容越详细大纲越准</div></div>' +
           '</div>' +
           '<div class="field" style="margin-top:18px"><label>项目标题<span class="opt">可选，留空则由 AI 自动生成</span></label>' +
             '<input type="text" id="np-title" placeholder="例如：Q3 市场战略汇报" value="' + esc(w.title) + '"></div>' +
@@ -857,7 +859,7 @@
     var topicCount = document.getElementById('topic-count');
     function updateCount() {
       var n = topicTa.value.trim().length;
-      topicCount.textContent = '已输入 ' + n + ' 字 · 建议 50–20000 字，长提示词效果更好';
+      topicCount.textContent = '已输入 ' + n + ' 字 · 支持最长 10 万字，内容越详细大纲越准';
       w.topic = topicTa.value;
     }
     topicTa.addEventListener('input', updateCount);
@@ -975,32 +977,90 @@
         }
         w.themeId = (dt || state.themes[0]).id;
       }
-      var grid = document.createElement('div');
-      grid.className = 'theme-grid';
-      state.themes.forEach(function (t) {
+      /* group themes by category: brand / deck / layout / generic (missing -> generic) */
+      var CAT_ORDER = [
+        ['brand', '品牌风格', '品牌', 'badge-indigo'],
+        ['deck', '机构模板', '机构', 'badge-amber'],
+        ['layout', '版式风格', '版式', 'badge-green'],
+        ['generic', '通用风格', '内置', 'badge-blue']
+      ];
+      function catOf(t) {
+        var c = t.category;
+        return (c === 'brand' || c === 'deck' || c === 'layout') ? c : 'generic';
+      }
+      function catBadge(t) {
+        var c = catOf(t);
+        if (c === 'generic' && !t.builtin) return ['自定义', 'badge-gray'];
+        for (var i = 0; i < CAT_ORDER.length; i++) {
+          if (CAT_ORDER[i][0] === c) return [CAT_ORDER[i][2], CAT_ORDER[i][3]];
+        }
+        return ['内置', 'badge-blue'];
+      }
+
+      function makeThemeCard(t) {
+        var bdg = catBadge(t);
         var card = document.createElement('div');
         card.className = 'theme-card' + (String(t.id) === String(w.themeId) ? ' selected' : '');
         card.setAttribute('data-id', t.id);
+        var palHtml = (Array.isArray(t.palette) && t.palette.length)
+          ? themePalette(t).map(function (c) {
+              return '<i style="background:' + esc(c) + '" title="' + esc(c) + '"></i>';
+            }).join('')
+          : '<span class="pal-free">自由配色</span>';
         card.innerHTML =
           '<span class="check">' + ICONS.check + '</span>' +
           miniSlideHTML(t) +
           '<div class="t-body">' +
             '<div class="t-name">' + esc(themeName(t)) +
-              (t.builtin ? '<span class="badge badge-blue" style="font-size:11px;padding:2px 7px">内置</span>' : '') +
+              '<span class="badge ' + bdg[1] + '" style="font-size:11px;padding:2px 7px">' + bdg[0] + '</span>' +
             '</div>' +
             '<div class="t-desc">' + esc(themeDesc(t)) + '</div>' +
-            '<div class="t-pal">' + themePalette(t).map(function (c) {
-              return '<i style="background:' + esc(c) + '" title="' + esc(c) + '"></i>';
-            }).join('') + '</div>' +
+            '<div class="t-pal">' + palHtml + '</div>' +
           '</div>';
         card.addEventListener('click', function () {
           w.themeId = t.id;
-          grid.querySelectorAll('.theme-card').forEach(function (x) { x.classList.toggle('selected', x === card); });
+          wrap.querySelectorAll('.theme-card').forEach(function (x) { x.classList.toggle('selected', x === card); });
         });
-        grid.appendChild(card);
+        return card;
+      }
+
+      var groups = [];
+      CAT_ORDER.forEach(function (c) {
+        var items = state.themes.filter(function (t) { return catOf(t) === c[0]; });
+        if (items.length) groups.push({ key: c[0], label: c[1], items: items });
       });
+
       wrap.innerHTML = '';
-      wrap.appendChild(grid);
+      /* sticky anchor chips for quick jumping between groups */
+      if (groups.length > 1) {
+        var chips = document.createElement('div');
+        chips.className = 'theme-chips';
+        groups.forEach(function (g) {
+          var chip = document.createElement('button');
+          chip.className = 'theme-chip';
+          chip.textContent = g.label;
+          chip.addEventListener('click', function () {
+            var sec = document.getElementById('theme-cat-' + g.key);
+            if (sec && sec.scrollIntoView) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+          chips.appendChild(chip);
+        });
+        wrap.appendChild(chips);
+      }
+      groups.forEach(function (g) {
+        var sec = document.createElement('div');
+        sec.className = 'theme-group';
+        sec.id = 'theme-cat-' + g.key;
+        var head = document.createElement('div');
+        head.className = 'tg-head';
+        head.innerHTML = esc(g.label) + '<span class="tg-count">' + g.items.length + '</span>';
+        sec.appendChild(head);
+        var grid = document.createElement('div');
+        grid.className = 'theme-grid';
+        g.items.forEach(function (t) { grid.appendChild(makeThemeCard(t)); });
+        sec.appendChild(grid);
+        wrap.appendChild(sec);
+      });
     });
 
     submitBtn.addEventListener('click', function () {
@@ -1391,6 +1451,7 @@
             '<button class="btn btn-primary btn-sm hidden" id="pv-save-svg">' + ICONS.save + '保存修改</button>' +
             '<button class="btn btn-outline btn-sm hidden" id="pv-discard-svg">放弃修改</button>' +
             '<button class="btn btn-outline btn-sm" id="pv-zoom">' + ICONS.zoom + '查看大图</button>' +
+            '<button class="btn btn-outline btn-sm" id="pv-share">' + ICONS.share + '分享</button>' +
             '<span style="color:var(--text-3);font-size:12px">点击页面中的文字可直接编辑</span>' +
             '<span class="spacer"></span>' +
             '<span class="page-label" id="pv-page-label"></span>' +
@@ -1408,6 +1469,9 @@
     });
     document.getElementById('pv-zoom').addEventListener('click', function () {
       openZoomModal(p.id, state.preview.currentPage);
+    });
+    document.getElementById('pv-share').addEventListener('click', function () {
+      openShareModal(p.id);
     });
     document.getElementById('pv-save-svg').addEventListener('click', function () {
       saveSvgEdits(p.id, state.preview.currentPage);
@@ -1972,6 +2036,74 @@
       });
     }).catch(function (e) {
       if (e.message !== 'unauthorized') toast(e.message, 'error');
+    });
+  }
+
+  /* ---------- share link (public read-only viewer) ---------- */
+  function copyShareLink(input, btn) {
+    function done() {
+      btn.textContent = '已复制';
+      toast('链接已复制到剪贴板', 'success');
+      setTimeout(function () { btn.textContent = '复制链接'; }, 2000);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).then(done, function () {
+        input.select();
+        document.execCommand('copy');
+        done();
+      });
+    } else {
+      input.select();
+      document.execCommand('copy');
+      done();
+    }
+  }
+
+  function openShareModal(projectId) {
+    api('/api/projects/' + projectId + '/share', { method: 'POST' }).then(function (d) {
+      var url = location.origin + d.share_url;
+      openModal({
+        title: '分享项目 · 已开启分享',
+        render: function (body, foot, close) {
+          body.innerHTML =
+            '<div style="color:var(--text-2);font-size:13.5px;margin-bottom:12px">' +
+              '任何人通过此链接都能只读浏览该演示文稿（无需登录）：</div>' +
+            '<input id="share-url-input" readonly style="width:100%;padding:9px 12px;font-size:13px;' +
+              'border:1px solid var(--border-strong);border-radius:9px;background:var(--bg);' +
+              'color:var(--text);font-family:var(--mono)" value="' + esc(url) + '">' +
+            '<div style="color:var(--text-3);font-size:12px;margin-top:10px">' +
+              '再次打开此弹窗链接保持不变；撤销后链接立即失效。</div>';
+          var input = body.querySelector('#share-url-input');
+          input.addEventListener('focus', function () { input.select(); });
+          var revoke = document.createElement('button');
+          revoke.className = 'btn btn-danger-solid';
+          revoke.textContent = '撤销分享';
+          revoke.addEventListener('click', function () {
+            confirmDanger({
+              title: '撤销分享',
+              heading: '确定撤销分享吗？',
+              message: '撤销后该链接立即失效，已收到链接的人将无法再访问。',
+              okText: '撤销分享',
+              onOk: function () {
+                return api('/api/projects/' + projectId + '/share', { method: 'DELETE' }).then(function () {
+                  toast('分享已撤销', 'success');
+                  close();
+                }).catch(function (e) {
+                  if (e.message !== 'unauthorized') toast('撤销失败：' + e.message, 'error');
+                });
+              }
+            });
+          });
+          var copy = document.createElement('button');
+          copy.className = 'btn btn-primary';
+          copy.textContent = '复制链接';
+          copy.addEventListener('click', function () { copyShareLink(input, copy); });
+          foot.appendChild(revoke);
+          foot.appendChild(copy);
+        }
+      });
+    }).catch(function (e) {
+      if (e.message !== 'unauthorized') toast('开启分享失败：' + e.message, 'error');
     });
   }
 

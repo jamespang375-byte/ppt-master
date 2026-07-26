@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS settings(
 _MIGRATIONS = (
     ("themes", "description", "TEXT"),
     ("themes", "palette", "TEXT"),
+    ("themes", "category", "TEXT"),
+    ("projects", "share_token", "TEXT"),
 )
 
 

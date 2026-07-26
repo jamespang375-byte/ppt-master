@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分享演示 · PPT Master Agent</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #111827;
+  --text-2: #6b7280;
+  --text-3: #9ca3af;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(16, 24, 40, .06), 0 1px 2px rgba(16, 24, 40, .04);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 14px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+.topbar {
+  background: rgba(255, 255, 255, .88);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 40;
+}
+.topbar-inner {
+  max-width: 1280px; margin: 0 auto; padding: 0 24px; height: 58px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; gap: 14px;
+}
+.deck-title {
+  font-weight: 700; font-size: 15px; letter-spacing: -.2px;
+  max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.page-badge {
+  color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 12px; white-space: nowrap;
+}
+main {
+  flex: 1; width: 100%; max-width: 1280px; margin: 0 auto;
+  padding: 24px 24px 8px; display: flex; flex-direction: column;
+}
+.stage {
+  background: linear-gradient(155deg, #0f172a, #1e293b);
+  border: 1px solid #0b1220; border-radius: var(--radius); box-shadow: var(--shadow);
+  aspect-ratio: 16 / 9; width: 100%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  padding: 26px; touch-action: pan-y; user-select: none;
+}
+.stage svg {
+  width: 100%; height: 100%; display: block;
+  background: #fff; border-radius: 6px;
+  box-shadow: 0 20px 48px rgba(2, 6, 23, .55);
+}
+.stage-msg {
+  color: #94a3b8; font-size: 13px; text-align: center; padding: 20px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, .35); border-top-color: #94a3b8;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.nav-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; padding: 16px 0 4px;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font); font-size: 13.5px; font-weight: 500;
+  padding: 8px 18px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  transition: border-color .15s, color .15s;
+}
+.btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.btn:disabled { opacity: .45; cursor: default; }
+.kbd-hint { color: var(--text-3); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.kbd-hint kbd {
+  font-family: var(--font); font-size: 11px; background: var(--surface);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  border-radius: 5px; padding: 1px 6px; color: var(--text-2);
+}
+footer {
+  text-align: center; padding: 14px 0 20px;
+  color: var(--text-3); font-size: 12px;
+}
+.fatal {
+  max-width: 460px; margin: 15vh auto 0; text-align: center;
+  color: var(--text-2); font-size: 14px;
+}
+.fatal h1 { font-size: 18px; color: var(--text); margin-bottom: 8px; }
+@media (max-width: 640px) {
+  main { padding: 14px 12px 4px; }
+  .stage { padding: 10px; }
+  .kbd-hint { display: none; }
+  .deck-title { max-width: 46vw; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="deck-title" id="deck-title">加载中…</span>
+    <span class="page-badge" id="page-badge"></span>
+  </div>
+</header>
+<main>
+  <div class="stage" id="stage"><div class="stage-msg"><span class="spinner"></span>加载中…</div></div>
+  <div class="nav-row" id="nav-row" hidden>
+    <button class="btn" id="btn-prev">‹ 上一页</button>
+    <button class="btn" id="btn-next">下一页 ›</button>
+    <span class="kbd-hint"><kbd>←</kbd><kbd>→</kbd>翻页</span>
+  </div>
+</main>
+<footer>由 PPT Master Agent 生成</footer>
+<script>
+(function () {
+  'use strict';
+  var token = (location.pathname.match(/^\/share\/([^\/?#]+)/) || [])[1] || '';
+  var stage = document.getElementById('stage');
+  var titleEl = document.getElementById('deck-title');
+  var badgeEl = document.getElementById('page-badge');
+  var navRow = document.getElementById('nav-row');
+  var btnPrev = document.getElementById('btn-prev');
+  var btnNext = document.getElementById('btn-next');
+
+  var total = 0;
+  var current = 1;
+  var cache = {};
+
+  function fatal(title, msg) {
+    document.body.innerHTML =
+      '<div class="fatal"><h1>' + title + '</h1><div>' + msg + '</div></div>';
+  }
+
+  function paint() {
+    badgeEl.textContent = total ? (current + ' / ' + total) : '';
+    btnPrev.disabled = current <= 1;
+    btnNext.disabled = current >= total;
+    var svg = cache[current];
+    if (svg && svg.indexOf('<svg') !== -1) {
+      stage.innerHTML = svg;
+    } else {
+      stage.innerHTML = '<div class="stage-msg">该页尚未生成</div>';
+    }
+    /* prefetch neighbours */
+    [current - 1, current + 1].forEach(function (n) {
+      if (n >= 1 && n <= total && !cache[n]) loadPage(n);
+    });
+  }
+
+  function loadPage(n) {
+    return fetch('/api/share/' + encodeURIComponent(token) + '/pages/' + n)
+      .then(function (res) {
+        if (!res.ok) throw new Error('page ' + res.status);
+        return res.text();
+      })
+      .then(function (text) {
+        cache[n] = text;
+        if (n === current) paint();
+      })
+      .catch(function () {
+        if (n === current) {
+          stage.innerHTML = '<div class="stage-msg">该页加载失败，项目可能尚未完成导出</div>';
+        }
+      });
+  }
+
+  function go(n) {
+    if (n < 1 || n > total || n === current) return;
+    current = n;
+    if (cache[current]) paint();
+    else {
+      stage.innerHTML = '<div class="stage-msg"><span class="spinner"></span>加载中…</div>';
+      badgeEl.textContent = current + ' / ' + total;
+      btnPrev.disabled = current <= 1;
+      btnNext.disabled = current >= total;
+      loadPage(current);
+    }
+  }
+
+  btnPrev.addEventListener('click', function () { go(current - 1); });
+  btnNext.addEventListener('click', function () { go(current + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') go(current - 1);
+    else if (e.key === 'ArrowRight') go(current + 1);
+  });
+
+  /* touch swipe */
+  var touchX = null;
+  stage.addEventListener('touchstart', function (e) {
+    touchX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  stage.addEventListener('touchend', function (e) {
+    if (touchX == null) return;
+    var dx = e.changedTouches[0].clientX - touchX;
+    touchX = null;
+    if (Math.abs(dx) < 48) return;
+    if (dx < 0) go(current + 1); else go(current - 1);
+  }, { passive: true });
+
+  if (!token) {
+    fatal('链接无效', '分享链接缺少标识。');
+    return;
+  }
+  fetch('/api/share/' + encodeURIComponent(token))
+    .then(function (res) {
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    })
+    .then(function (meta) {
+      titleEl.textContent = meta.title || '分享演示';
+      document.title = (meta.title || '分享演示') + ' · PPT Master Agent';
+      total = meta.page_count || 0;
+      if (!total) {
+        stage.innerHTML = '<div class="stage-msg">该项目尚未完成导出，暂无可分享的页面</div>';
+        badgeEl.textContent = '';
+        return;
+      }
+      navRow.hidden = false;
+      badgeEl.textContent = '1 / ' + total;
+      btnPrev.disabled = true;
+      btnNext.disabled = total <= 1;
+      loadPage(1);
+    })
+    .catch(function () {
+      fatal('链接不存在或已撤销', '该分享链接可能已被作者撤销，或地址有误。');
+    });
+})();
+</script>
+</body>
+</html>
