@@ -144,10 +144,12 @@ def logout(request: Request, user: dict = Depends(current_user)) -> dict:
 
 
 @app.get("/api/auth/me")
-def me(user: dict = Depends(current_user)) -> dict:
+def me(request: Request, user: dict = Depends(current_user)) -> dict:
+    eff = resolve(_settings(request), request.app.state.db)
     return {"user": public_user(user),
             "token_used": user["token_used"],
-            "token_quota": user["token_quota"]}
+            "token_quota": user["token_quota"],
+            "mock_mode": eff.mock_llm}
 
 
 # ---------------------------------------------------------------------------
@@ -870,6 +872,45 @@ async def admin_test_llm(request: Request,
         "latency_ms": int((time.monotonic() - started) * 1000),
         "model": eff.llm_model,
     }
+
+
+@app.post("/api/admin/settings/test-image")
+def admin_test_image(body: dict, request: Request,
+                     admin: dict = Depends(admin_user)) -> dict:
+    """Ping the effective key of one image provider ("pexels" / "pixabay")
+    with a minimal search request. Always HTTP 200; failures in the body."""
+    import urllib.error
+    import urllib.request
+
+    from .config import effective_image_keys
+
+    provider = str(body.get("provider", "")).strip().lower()
+    keys = effective_image_keys(request.app.state.db)
+    key = keys.get(f"{provider}_api_key", ("",))[0]
+    if provider not in ("pexels", "pixabay"):
+        return {"ok": False, "error": "provider must be 'pexels' or 'pixabay'"}
+    if not key:
+        return {"ok": False, "error": "未配置该服务商的 API Key"}
+    if provider == "pexels":
+        req = urllib.request.Request(
+            "https://api.pexels.com/v1/search?query=nature&per_page=1",
+            headers={"Authorization": key})
+    else:
+        req = urllib.request.Request(
+            f"https://pixabay.com/api/?key={key}&q=nature&per_page=3")
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            ok = resp.status == 200
+            if not ok:
+                return {"ok": False, "error": f"HTTP {resp.status}"}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "error": f"HTTP {exc.code}（Key 无效或已过期）"}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+    return {"ok": True,
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "provider": provider}
 
 
 # ---------------------------------------------------------------------------
