@@ -11,14 +11,21 @@ docs/saas/ARCHITECTURE.md §3) and starts uvicorn.
 Desktop behavior (packaged boxes and local runs alike):
     - Prints a startup banner with the access URL.
     - If the configured port is already taken, falls back to a free port
-      (with a warning) instead of crashing.
-    - Once the server answers HTTP, opens the UI automatically: prefers a
-      chromeless ``--app=`` window (Edge/Chrome) so it feels like a native
-      app, falling back to the default browser. Set PPTSAAS_NO_BROWSER=1
-      to disable (headless servers, CI).
+      (with a warning) instead of crashing. If the occupying service is
+      another PPT Master Agent instance, the window attaches to it
+      instead of starting a second server (single-instance feel).
+    - UI presentation, best first:
+      1. Native desktop window via pywebview (real window, dock/taskbar
+         entry, closing it quits the app). Enabled automatically when
+         pywebview is installed; force with PPTSAAS_DESKTOP=1, disable
+         with PPTSAAS_DESKTOP=0.
+      2. Chromeless ``--app=`` window (Edge/Chrome).
+      3. Default browser tab.
+      Set PPTSAAS_NO_BROWSER=1 to disable UI opening entirely
+      (headless servers, CI).
 
 Dependencies:
-    uvicorn
+    uvicorn (required), pywebview (optional, native window)
 """
 
 import os
@@ -139,9 +146,98 @@ def _open_ui_when_ready(url: str, timeout: float = 60.0) -> None:
     _open_ui(url)
 
 
-def _maybe_autopen(url: str, port: int) -> None:
-    raw = (os.environ.get("PPTSAAS_NO_BROWSER") or "").strip().lower()
+def _env_flag(name: str) -> bool | None:
+    raw = (os.environ.get(name) or "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _no_browser() -> bool:
+    return _env_flag("PPTSAAS_NO_BROWSER") is True
+
+
+def _desktop_mode_enabled() -> bool:
+    """原生桌面窗口（pywebview）是否可用：显式开关优先，默认装了就用。"""
+    forced = _env_flag("PPTSAAS_DESKTOP")
+    if forced is not None:
+        return forced
+    try:
+        import webview  # noqa: F401
+    except Exception:
+        return False
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return False
+    return True
+
+
+def _existing_instance(port: int) -> bool:
+    """端口上已跑着另一个 PPT Master Agent（桌面模式复用它，避免双开两个服务）。"""
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=2) as resp:
+            return b"PPT Master" in resp.read(65536)
+    except (OSError, ValueError):
+        return False
+
+
+def _run_desktop(host: str, port: int, reuse_existing: bool) -> int:
+    """原生窗口模式：uvicorn 跑后台线程，pywebview 窗口占主线程（macOS 要求），
+    关窗即退出整个应用。"""
+    import time
+
+    import uvicorn
+    import webview
+
+    url = f"http://localhost:{port}"
+    splash = _splash_path()
+    splash_html = splash.read_text(encoding="utf-8") if splash else ""
+
+    window = webview.create_window(
+        "PPT Master Agent",
+        html=splash_html,
+        width=1440,
+        height=900,
+        min_size=(1024, 640),
+    )
+
+    def _ensure_app_page() -> None:
+        # splash 自带轮询跳转；若其 fetch 被 WebView 策略拦截，这里兜底跳转。
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=2):
+                    break
+            except OSError:
+                time.sleep(0.3)
+        else:
+            return
+        time.sleep(1.0)
+        try:
+            if not (window.get_current_url() or "").startswith(url):
+                window.load_url(url)
+        except Exception:
+            pass
+
+    if not reuse_existing:
+        config = uvicorn.Config(app, host=host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        threading.Thread(target=server.run, daemon=True).start()
+
+    threading.Thread(target=_ensure_app_page, daemon=True).start()
+    try:
+        webview.start()
+    finally:
+        # 关窗 = 退出应用（窗口是主线程，uvicorn 是 daemon 线程，随之结束）。
+        os._exit(0)
+    return 0
+
+
+def _maybe_autopen(url: str, port: int) -> None:
+    if _no_browser():
         return
     splash = _splash_path()
     if splash is not None:
@@ -156,7 +252,12 @@ def main() -> int:
     import uvicorn
 
     settings = get_settings()
-    port, fell_back = _pick_port(settings.host, settings.port)
+    desktop = _desktop_mode_enabled() and not _no_browser()
+    reuse = desktop and _existing_instance(settings.port)
+    if reuse:
+        port, fell_back = settings.port, False
+    else:
+        port, fell_back = _pick_port(settings.host, settings.port)
     if fell_back:
         print(
             f"[pptsaas] 警告：端口 {settings.port} 已被占用，改用 {port}。"
@@ -172,6 +273,11 @@ def main() -> int:
     print(f"  运行模式：{mode}", flush=True)
     print("  停止服务：关闭本窗口或按 Ctrl+C", flush=True)
     print("=" * 56, flush=True)
+
+    if desktop:
+        if reuse:
+            print(f"[pptsaas] 检测到已有实例运行在 {url}，窗口将直接接入。", flush=True)
+        return _run_desktop(settings.host, port, reuse)
 
     _maybe_autopen(url, port)
 

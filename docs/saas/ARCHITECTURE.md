@@ -81,6 +81,8 @@ This mirrors what `svg_to_pptx.py` expects (native source = `svg_output/`).
 | `PPTSAAS_SESSION_TTL_HOURS` | `72` | session expiry |
 | `PEXELS_API_KEY` / `PIXABAY_API_KEY` | — | image search providers (no key → openverse+wikimedia) |
 | `PPTSAAS_IMAGE_PROVIDER` | `auto` | pin image search to one provider: `auto`/`pexels`/`pixabay`/`openverse`/`wikimedia` (admin UI may override) |
+| `PPTSAAS_DESKTOP` | auto | native desktop window via pywebview (`app/backend/requirements-desktop.txt`): `1` force on, `0` force browser mode. Auto = on when pywebview is installed (and a display exists on Linux). Closing the native window quits the app; if another instance already serves the configured port, the window attaches to it instead of starting a second server |
+| `PPTSAAS_NO_BROWSER` | — | `1` = never open any UI window (headless servers, CI) |
 
 `.env` at repo root is loaded if present (pexels keys already live there).
 

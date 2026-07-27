@@ -1,0 +1,13 @@
+# 可选依赖：原生桌面窗口模式（PPTSAAS_DESKTOP）。
+# 安装后 run.py 自动启用原生应用窗口（关窗即退出、独立 Dock/任务栏图标），
+# 未安装时回退到浏览器 --app 窗口，功能不受影响。
+#
+#   pip install -r app/backend/requirements-desktop.txt
+#
+# 平台说明：
+#   - macOS：依赖 pyobjc（下方自动带入），使用系统 WKWebView，零额外运行时。
+#   - Windows：使用系统 WebView2（Win10 1803+ / Win11 通常已内置；
+#     缺失时引导用户安装 WebView2 Runtime）。
+#   - Linux：需要 GTK3 + WebKitGTK（如 libwebkit2gtk-4.0），服务器/无显示环境
+#     请保持未安装状态，应用会自动走浏览器模式。
+pywebview>=6.0
