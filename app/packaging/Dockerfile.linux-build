@@ -117,15 +117,14 @@ RUN set -eux; \
     printf '%s\n' \
       '[Desktop Entry]' \
       'Type=Application' \
-      'Name=PPT Master Agent SaaS' \
+      'Name=PPT Master Agent' \
       'Comment=AI presentation generation service' \
       'Exec=pptsaas' \
       'Icon=pptsaas' \
       'Categories=Office;' \
       'Terminal=true' \
       > "$APPDIR/pptsaas.desktop"; \
-    printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' \
-      | base64 -d > "$APPDIR/pptsaas.png"
+    cp /repo/app/packaging/assets/pptsaas.png "$APPDIR/pptsaas.png"
 
 RUN set -ux; \
     URL_MAIN="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"; \

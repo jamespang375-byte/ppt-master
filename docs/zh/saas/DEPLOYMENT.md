@@ -168,13 +168,15 @@ pptsaas\
 ### 2.3 终端用户使用
 
 1. 解压 `pptsaas-windows-x86_64.zip` 到任意目录，例如 `D:\pptsaas\`。
-2. 把 `.env.example` 复制为 `.env`，至少写入 LLM 配置（格式同 1.3 节）；不配则进入 mock 演示模式。
-3. 双击 `start.bat`：服务启动后**自动弹出应用窗口**（Edge/Chrome 的无边框 `--app` 模式，看起来就是独立应用；找不到这两种浏览器时退回默认浏览器标签页）。
+2. 把 `.env.example` 复制为 `.env`，至少写入 LLM 配置（格式同 1.3 节）；不配则进入 mock 演示模式（界面内也可随时配置，见「设置」页与首次启动向导）。
+3. 双击 `start.bat`：先弹出**品牌启动页**（splash），服务就绪后自动切换进应用窗口（Edge/Chrome 的无边框 `--app` 模式，看起来就是独立应用；找不到这两种浏览器时退回默认浏览器标签页）。
 4. 停止：直接关闭黑色控制台窗口（或 Ctrl+C）。数据存放在解压目录的 `data\`（或 `.env` 中 `PPTSAAS_DATA_DIR` 指定路径）。
 
-> 桌面体验细节（`app/backend/run.py`）：
-> - 启动横幅会打印访问地址与运行模式（真实模型 / mock 演示）。
-> - 端口被占用时自动改用一个空闲端口并在横幅中提示，不会直接闪退；需要固定端口可在 `.env` 设 `PPTSAAS_PORT`。
+> 桌面体验细节（`app/backend/run.py` / `app/backend/config.py`）：
+> - exe 带品牌图标（`app/packaging/assets/pptsaas.ico`，由 `make_icons.py` 生成），任务栏/资源管理器均显示。
+> - 启动页轮询 8310-8319 端口，服务在哪个端口起来就跳进哪个；90 秒未就绪会显示排查提示。
+> - 端口被占用时按顺序自动改用下一个空闲端口（8310→8319，全满再随机），横幅中提示实际地址；需要固定端口可在 `.env` 设 `PPTSAAS_PORT`。
+> - 直接双击 `app\pptsaas.exe` 也能正常运行（自动识别同包的 `python\` 内嵌解释器与 `data\` 目录），但推荐仍用 `start.bat`（默认仅监听本机回环，避免防火墙弹窗）。
 > - 不想自动打开界面（纯服务器部署、远程终端）时设 `PPTSAAS_NO_BROWSER=1`。
 
 ### 2.4 防火墙、杀毒软件与端口
@@ -210,7 +212,7 @@ tar.gz 解压后的目录结构与 2.2 节相同（`pptsaas.sh` 对应 `start.ba
 tar -xzf pptsaas-linux-x86_64.tar.gz
 cd pptsaas
 cp .env.example .env      # 填入 PPTSAAS_LLM_API_KEY 等；不配为 mock 演示模式
-./pptsaas.sh              # 启动后自动打开应用窗口（无桌面/浏览器的环境设 PPTSAAS_NO_BROWSER=1，再手动访问 http://localhost:8310）
+./pptsaas.sh              # 启动后先显示品牌启动页，就绪自动进入应用窗口（无桌面/浏览器的环境设 PPTSAAS_NO_BROWSER=1，再手动访问 http://localhost:8310）
 ```
 
 - 数据目录默认在解压目录的 `data/`，可用 `PPTSAAS_DATA_DIR` 改到别处。

@@ -45,11 +45,29 @@ def _port_in_use(host: str, port: int) -> bool:
         return sock.connect_ex((bind_host, port)) == 0
 
 
+def _pick_port(host: str, preferred: int) -> tuple[int, bool]:
+    """优先用配置端口；被占用时顺序尝试其后 9 个（与 splash 轮询范围一致），
+    仍全满才退回系统随机端口。返回 (port, 是否发生了回退)。"""
+    for port in range(preferred, preferred + 10):
+        if not _port_in_use(host, port):
+            return port, port != preferred
+    return _free_port(host), True
+
+
 def _free_port(host: str) -> int:
     bind_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((bind_host, 0))
         return sock.getsockname()[1]
+
+
+def _splash_path() -> Path | None:
+    """启动页 splash.html：冻结产物在 _MEIPASS 的 datas 里，开发态在仓库内。"""
+    if getattr(sys, "frozen", False):
+        path = Path(sys._MEIPASS) / "app" / "frontend" / "splash.html"  # type: ignore[attr-defined]
+    else:
+        path = _REPO_ROOT / "app" / "frontend" / "splash.html"
+    return path if path.is_file() else None
 
 
 def _app_window_candidates() -> list[list[str]]:
@@ -121,20 +139,25 @@ def _open_ui_when_ready(url: str, timeout: float = 60.0) -> None:
     _open_ui(url)
 
 
-def _maybe_autopen(url: str) -> None:
+def _maybe_autopen(url: str, port: int) -> None:
     raw = (os.environ.get("PPTSAAS_NO_BROWSER") or "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
         return
-    threading.Thread(target=_open_ui_when_ready, args=(url,), daemon=True).start()
+    splash = _splash_path()
+    if splash is not None:
+        # 立即打开启动页（无需等服务就绪）：它自带轮询，就绪后自动跳转。
+        splash_url = f"{splash.as_uri()}?port={port}"
+        threading.Thread(target=_open_ui, args=(splash_url,), daemon=True).start()
+    else:
+        threading.Thread(target=_open_ui_when_ready, args=(url,), daemon=True).start()
 
 
 def main() -> int:
     import uvicorn
 
     settings = get_settings()
-    port = settings.port
-    if _port_in_use(settings.host, port):
-        port = _free_port(settings.host)
+    port, fell_back = _pick_port(settings.host, settings.port)
+    if fell_back:
         print(
             f"[pptsaas] 警告：端口 {settings.port} 已被占用，改用 {port}。"
             "（如需固定端口请关闭占用进程或设置 PPTSAAS_PORT）",
@@ -150,7 +173,7 @@ def main() -> int:
     print("  停止服务：关闭本窗口或按 Ctrl+C", flush=True)
     print("=" * 56, flush=True)
 
-    _maybe_autopen(url)
+    _maybe_autopen(url, port)
 
     # 传 app 对象而非 "app.backend.main:app" 字符串：PyInstaller 冻结后
     # uvicorn 的字符串动态 import 找不到模块，对象引用则由静态分析收集。

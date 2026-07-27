@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPT Master Agent — 正在启动</title>
+<!--
+  桌面盒子启动页：双击 start.bat / pptsaas 后由 run.py 以 file:// 打开，
+  轮询本地服务端口（?port= 指定的优先，其后 8310-8319），就绪即跳转。
+  file:// 跨域 fetch 用 no-cors：连接被拒绝会 reject，服务起来了就
+  resolve（opaque），足以判断就绪。
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #3b82f6 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; overflow: hidden; user-select: none;
+  }
+  .glow {
+    position: absolute; width: 620px; height: 620px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.14) 0%, transparent 65%);
+    top: 50%; left: 50%; transform: translate(-50%, -58%);
+    animation: breathe 3.2s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity:.55; } 50% { opacity:1; } }
+  .card { position: relative; text-align: center; }
+  .logo {
+    width: 96px; height: 96px; margin: 0 auto 26px;
+    background: #fff; border-radius: 22px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, .35);
+    animation: pop .7s cubic-bezier(.2, 1.4, .4, 1) both;
+  }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  h1 { font-size: 30px; letter-spacing: .5px; font-weight: 700;
+       animation: rise .6s .15s ease-out both; }
+  .slogan { margin-top: 10px; font-size: 14px; opacity: .82;
+            animation: rise .6s .3s ease-out both; }
+  @keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .bar {
+    width: 220px; height: 4px; margin: 34px auto 0; border-radius: 2px;
+    background: rgba(255,255,255,.22); overflow: hidden;
+    animation: rise .6s .45s ease-out both;
+  }
+  .bar i {
+    display: block; height: 100%; width: 40%; border-radius: 2px;
+    background: #fff; animation: slide 1.1s ease-in-out infinite;
+  }
+  @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
+  .status { margin-top: 14px; font-size: 12.5px; opacity: .7;
+            animation: rise .6s .6s ease-out both; }
+  .err { display: none; margin-top: 22px; font-size: 13px; line-height: 1.8;
+         background: rgba(15,23,42,.35); border-radius: 10px; padding: 14px 20px; }
+  .ver { position: absolute; bottom: 22px; left: 0; right: 0; text-align: center;
+         font-size: 11.5px; opacity: .45; }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="card">
+  <div class="logo">
+    <svg width="54" height="54" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="7" fill="#fff"/>
+      <rect x="7" y="8" width="18" height="12" rx="2" fill="#2563eb"/>
+      <rect x="7" y="23" width="10" height="2.5" rx="1.2" fill="#2563eb" opacity=".75"/>
+    </svg>
+  </div>
+  <h1>PPT Master Agent</h1>
+  <div class="slogan">上传一份文档，AI 为你生成专业级演示文稿</div>
+  <div class="bar"><i></i></div>
+  <div class="status" id="status">正在启动服务…</div>
+  <div class="err" id="err">
+    启动似乎遇到了问题。<br>
+    请查看黑色控制台窗口中的日志，或关闭后重试。<br>
+    若端口被占用，可在 .env 中修改 PPTSAAS_PORT。
+  </div>
+</div>
+<div class="ver">PPT Master Agent SaaS · 本地桌面盒子</div>
+<script>
+(function () {
+  var statusEl = document.getElementById('status');
+  var errEl = document.getElementById('err');
+  var params = new URLSearchParams(location.search);
+  var hint = parseInt(params.get('port') || '', 10);
+  var ports = [];
+  if (hint >= 1 && hint <= 65535) ports.push(hint);
+  for (var p = 8310; p <= 8319; p++) if (ports.indexOf(p) === -1) ports.push(p);
+
+  var idx = 0, attempts = 0, MAX_ATTEMPTS = 120; // 约 90 秒
+  function tick() {
+    var port = ports[idx % ports.length];
+    idx++; attempts++;
+    if (attempts % 20 === 0) statusEl.textContent = '正在启动服务…（已等待 ' + Math.round(attempts * 0.75) + ' 秒）';
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 1500);
+    fetch('http://127.0.0.1:' + port + '/', { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store' })
+      .then(function () {
+        clearTimeout(timer);
+        statusEl.textContent = '就绪，正在进入…';
+        location.replace('http://localhost:' + port + '/');
+      })
+      .catch(function () {
+        clearTimeout(timer);
+        if (attempts >= MAX_ATTEMPTS) {
+          statusEl.textContent = '';
+          errEl.style.display = 'block';
+          return;
+        }
+        setTimeout(tick, 400);
+      });
+  }
+  tick();
+})();
+</script>
+</body>
+</html>

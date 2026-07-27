@@ -13,6 +13,7 @@ Dependencies:
 """
 
 import os
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +22,30 @@ if TYPE_CHECKING:
     from .db import Database
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _frozen_pkg_root() -> Path | None:
+    """PyInstaller 冻结产物（桌面盒子）的包根目录，非冻结态返回 None。
+
+    打包布局为 <pkg>/app/pptsaas[.exe]（exe 的上一级即包根，python/ 与
+    data/ 都是它的子目录）。识别后用户直接双击 exe 也能跑，不必经过
+    start.bat / pptsaas.sh 启动器。
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    return Path(sys.executable).resolve().parent.parent
+
+
+def _frozen_python_bin() -> str | None:
+    """桌面盒子里内嵌解释器的路径（未打包时 None）。"""
+    root = _frozen_pkg_root()
+    if root is None:
+        return None
+    for rel in ("python/python.exe", "python/bin/python3.12"):
+        candidate = root / rel
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _load_dotenv_file(env_path: Path) -> None:
@@ -120,10 +145,15 @@ def get_settings() -> Settings:
     """Build settings from the current environment."""
     fallbacks_raw = os.environ.get("PPTSAAS_LLM_MODEL_FALLBACKS", "")
     fallbacks = [m.strip() for m in fallbacks_raw.split(",") if m.strip()]
+    # 冻结产物（桌面盒子）默认：数据目录与内嵌解释器都取包根下的路径，
+    # 使直接双击 exe 与经过启动器行为一致；环境变量始终优先。
+    pkg_root = _frozen_pkg_root()
+    default_data = str(pkg_root / "data") if pkg_root else "./data"
+    default_python = _frozen_python_bin() or "python3"
     return Settings(
         port=_int_env("PPTSAAS_PORT", 8310),
         host=os.environ.get("PPTSAAS_HOST", "0.0.0.0"),
-        data_dir=Path(os.environ.get("PPTSAAS_DATA_DIR", "./data")).resolve(),
+        data_dir=Path(os.environ.get("PPTSAAS_DATA_DIR", default_data)).resolve(),
         skill_dir=Path(
             os.environ.get("PPTSAAS_SKILL_DIR", str(REPO_ROOT / "skills" / "ppt-master"))
         ).resolve(),
@@ -139,7 +169,7 @@ def get_settings() -> Settings:
         default_token_quota=_int_env("PPTSAAS_DEFAULT_TOKEN_QUOTA", 2_000_000),
         registration_open=_bool_env("PPTSAAS_REGISTRATION_OPEN", True),
         session_ttl_hours=_int_env("PPTSAAS_SESSION_TTL_HOURS", 72),
-        python_bin=os.environ.get("PPTSAAS_PYTHON", "python3"),
+        python_bin=os.environ.get("PPTSAAS_PYTHON", default_python),
     )
 
 

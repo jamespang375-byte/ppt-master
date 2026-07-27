@@ -76,6 +76,8 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
+    # Windows 资源管理器/任务栏图标（Linux 构建时 PyInstaller 忽略此参数）
+    icon=repo_path("app", "packaging", "assets", "pptsaas.ico"),
     codesign_identity=None,
     entitlements_file=None,
 )
