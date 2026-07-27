@@ -9,6 +9,7 @@
   var state = {
     token: localStorage.getItem(TOKEN_KEY) || null,
     user: readJSON(localStorage.getItem(USER_KEY)),
+    mockMode: false,   // /api/auth/me 返回的演示模式标记（未配置模型 key）
     themes: [],
     wizard: {          // step 1+2 draft, survives back/forth inside the wizard
       files: [], inputMode: 'files', topic: '', title: '',
@@ -244,9 +245,11 @@
   function clearAuth() {
     state.token = null;
     state.user = null;
+    state.mockMode = false;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     syncTopbar();
+    renderMockBanner();
   }
 
   function isAdmin() { return state.user && state.user.role === 'admin'; }
@@ -287,6 +290,379 @@
       location.hash = '#/login';
     });
   });
+
+  /* ============================== mock 模式横幅 + 首次配置向导 ============================== */
+  var SETUP_DISMISS_KEY = 'pptsaas_setup_dismissed';
+  var setupWizardOpen = false;
+  var setupWizardCompleted = false; /* 本次会话内走完整向导后不再自动弹出 */
+
+  /* 向导第 1 步的服务商预设（与设置页引导内容保持一致） */
+  var SETUP_PROVIDERS = [
+    { id: 'bailian', name: '阿里云百炼', tag: '推荐',
+      base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-max',
+      link: 'https://bailian.console.aliyun.com', linkName: 'bailian.console.aliyun.com',
+      how: '打开控制台 → 右上角头像 → API-KEY → 创建并复制' },
+    { id: 'deepseek', name: 'DeepSeek', tag: '',
+      base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat',
+      link: 'https://platform.deepseek.com', linkName: 'platform.deepseek.com',
+      how: '控制台 → API keys → 创建（需先充值，12 页 PPT 约几毛钱）' },
+    { id: 'zhipu', name: '智谱 GLM', tag: '',
+      base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash',
+      link: 'https://open.bigmodel.cn', linkName: 'open.bigmodel.cn',
+      how: '控制台 → API 密钥（glm-4-flash 可免费调用）' },
+    { id: 'custom', name: '自定义', tag: 'OpenAI 兼容',
+      base_url: '', model: '',
+      link: '', linkName: '',
+      how: '填写任意 OpenAI 兼容接口的 Base URL 与模型名（本地 Ollama、vLLM 等也可以，Key 填任意非空字符串）' }
+  ];
+
+  /* 拉取当前会话信息（含 mock_mode）：登录成功、带 token 刷新恢复会话、每次路由切换都会调用 */
+  function refreshMe() {
+    if (!state.token) return Promise.resolve(null);
+    return api('/api/auth/me').then(function (me) {
+      me = me || {};
+      if (me.user) {
+        state.user = me.user;
+        localStorage.setItem(USER_KEY, JSON.stringify(me.user));
+        syncTopbar();
+      }
+      state.mockMode = !!me.mock_mode;
+      renderMockBanner();
+      maybeShowSetupWizard();
+      return me;
+    }).catch(function () {
+      return null; /* 401 已由 api() 跳转登录页，其余错误静默处理，不打断界面 */
+    });
+  }
+
+  /* 顶栏下方的演示模式横幅：mock_mode=true 时对所有用户可见，按角色区分文案 */
+  function renderMockBanner() {
+    var el = document.getElementById('mock-banner');
+    if (!el) return;
+    if (!state.token || !state.mockMode) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      return;
+    }
+    if (isAdmin()) {
+      el.innerHTML = '<div class="mb-inner"><span class="mb-ico">' + ICONS.warn + '</span>' +
+        '<span class="mb-text">当前为演示模式（未配置模型），生成的内容仅为演示数据</span>' +
+        '<a class="mb-link" href="#/settings">去配置模型 →</a></div>';
+    } else {
+      el.innerHTML = '<div class="mb-inner"><span class="mb-ico">' + ICONS.warn + '</span>' +
+        '<span class="mb-text">系统当前为演示模式，生成的内容仅为演示数据，请联系管理员在「设置」中配置模型</span></div>';
+    }
+    el.classList.remove('hidden');
+  }
+
+  /* 首次启动引导：仅管理员 + 演示模式 + 未点过「暂不配置」时弹出 */
+  function maybeShowSetupWizard() {
+    if (setupWizardOpen || setupWizardCompleted || !state.token || !state.mockMode) return;
+    if (!isAdmin()) return;
+    if (localStorage.getItem(SETUP_DISMISS_KEY)) return;
+    openSetupWizard();
+  }
+
+  /* 首次配置向导：全屏遮罩，3 步（选服务商 → 模型 Key → 搜图 Key）+ 完成页 */
+  function openSetupWizard() {
+    setupWizardOpen = true;
+    var sw = {
+      step: 1, providerId: 'bailian',
+      baseUrl: SETUP_PROVIDERS[0].base_url, model: SETUP_PROVIDERS[0].model,
+      llmOk: false, pexelsDone: false
+    };
+    var mask = document.createElement('div');
+    mask.className = 'setup-mask';
+    document.body.appendChild(mask);
+
+    function close() { mask.remove(); setupWizardOpen = false; }
+    function dismiss() {
+      localStorage.setItem(SETUP_DISMISS_KEY, '1');
+      close();
+      toast('已进入演示模式，可稍后在「设置」中完成配置', 'info');
+    }
+    function provider() {
+      for (var i = 0; i < SETUP_PROVIDERS.length; i++) {
+        if (SETUP_PROVIDERS[i].id === sw.providerId) return SETUP_PROVIDERS[i];
+      }
+      return SETUP_PROVIDERS[0];
+    }
+
+    var STEP_LABELS = ['选择服务商', '配置模型 Key', '搜图 Key（可选）'];
+    function stepsHTML() {
+      var html = '<div class="stepper setup-stepper">';
+      STEP_LABELS.forEach(function (label, i) {
+        var n = i + 1;
+        var cls = n < sw.step || sw.step > 3 ? 'done' : n === sw.step ? 'active' : '';
+        html += '<div class="step ' + cls + '">' +
+          '<div class="dot">' + (cls === 'done' ? ICONS.check : n) + '</div>' +
+          '<div class="s-label">' + esc(label) + '</div></div>';
+        if (n < STEP_LABELS.length) {
+          html += '<div class="step-line' + (n < sw.step ? ' done' : '') + '"></div>';
+        }
+      });
+      return html + '</div>';
+    }
+
+    function shellHTML(inner) {
+      return '<div class="setup-card">' +
+        '<div class="setup-head">' +
+          '<div class="setup-brand"><span class="sb-logo"><svg width="22" height="22" viewBox="0 0 32 32">' +
+            '<rect width="32" height="32" rx="7" fill="#2563eb"/>' +
+            '<rect x="7" y="8" width="18" height="12" rx="2" fill="#fff"/>' +
+            '<rect x="7" y="23" width="10" height="2.5" rx="1.2" fill="#fff" opacity=".8"/></svg></span>' +
+            '<b>欢迎使用 PPT Master Agent</b></div>' +
+          '<button class="setup-skip" id="sw-dismiss">暂不配置，先体验演示模式</button>' +
+        '</div>' +
+        inner +
+      '</div>';
+    }
+
+    /* ---------- 第 1 步：选择服务商 ---------- */
+    function step1HTML() {
+      var cards = SETUP_PROVIDERS.map(function (p) {
+        return '<div class="prov-card' + (p.id === sw.providerId ? ' active' : '') + '" data-prov="' + p.id + '">' +
+          (p.tag ? '<span class="pc-tag">' + esc(p.tag) + '</span>' : '') +
+          '<div class="pc-name">' + esc(p.name) + '</div>' +
+          '<div class="pc-desc">' + esc(p.id === 'custom' ? '手填 Base URL 与模型' : p.model) + '</div>' +
+        '</div>';
+      }).join('');
+      var custom = sw.providerId === 'custom' ?
+        '<div class="field"><label>Base URL</label>' +
+          '<input type="text" id="sw-base-url" value="' + esc(sw.baseUrl) + '" placeholder="例如 https://api.openai.com/v1"></div>' +
+        '<div class="field"><label>模型名称</label>' +
+          '<input type="text" id="sw-model" value="' + esc(sw.model) + '" placeholder="例如 gpt-4o-mini"></div>' : '';
+      return stepsHTML() +
+        '<h2 class="setup-title">选择模型服务商</h2>' +
+        '<div class="setup-sub">生成 PPT 的大纲与页面内容都靠它，之后可随时在「设置」中更换</div>' +
+        '<div class="prov-grid">' + cards + '</div>' + custom +
+        '<div class="setup-foot"><span class="right">' +
+          '<button class="btn btn-primary btn-lg" id="sw-next1">下一步</button>' +
+        '</span></div>';
+    }
+
+    function bindStep1() {
+      mask.querySelectorAll('.prov-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          rememberCustom(); /* 切走自定义前记住手填的值 */
+          sw.providerId = card.getAttribute('data-prov');
+          var p = provider();
+          if (p.id !== 'custom') { sw.baseUrl = p.base_url; sw.model = p.model; }
+          sw.llmOk = false;
+          draw();
+        });
+      });
+      document.getElementById('sw-next1').addEventListener('click', function () {
+        rememberCustom();
+        if (sw.providerId === 'custom' && (!sw.baseUrl || !sw.model)) {
+          toast('请填写 Base URL 和模型名称', 'error');
+          return;
+        }
+        sw.step = 2;
+        draw();
+      });
+    }
+
+    function rememberCustom() {
+      if (sw.providerId !== 'custom') return;
+      var b = document.getElementById('sw-base-url');
+      var m = document.getElementById('sw-model');
+      if (b) sw.baseUrl = b.value.trim();
+      if (m) sw.model = m.value.trim();
+    }
+
+    /* ---------- 第 2 步：粘贴模型 Key 并测试 ---------- */
+    function step2HTML() {
+      var p = provider();
+      var guide = p.link ?
+        '申请地址 <a href="' + esc(p.link) + '" target="_blank" rel="noopener">' + esc(p.linkName) + '</a>：' + esc(p.how) :
+        esc(p.how);
+      return stepsHTML() +
+        '<h2 class="setup-title">粘贴 API Key</h2>' +
+        '<div class="setup-sub">当前服务商：<b>' + esc(p.name) + '</b> · 模型 <code class="setup-code">' + esc(sw.model) + '</code></div>' +
+        '<div class="field"><label>API Key</label>' +
+          '<input type="password" id="sw-llm-key" autocomplete="new-password" placeholder="粘贴你的 API Key"></div>' +
+        '<button class="btn btn-ghost btn-sm" id="sw-guide-toggle">' + ICONS.info + '如何获取 Key？</button>' +
+        '<div class="guide-panel hidden" id="sw-guide">' +
+          '<div class="guide-item"><div class="gi-body">' + guide + '</div></div>' +
+        '</div>' +
+        '<div id="sw-llm-result" style="margin:10px 0 2px"></div>' +
+        '<div class="setup-foot">' +
+          '<button class="btn btn-outline" id="sw-back1">上一步</button>' +
+          '<span class="right">' +
+            '<button class="btn btn-outline" id="sw-llm-test">' + ICONS.zap + '保存并测试连接</button>' +
+            '<button class="btn btn-primary" id="sw-next2"' + (sw.llmOk ? '' : ' disabled') + '>下一步</button>' +
+          '</span>' +
+        '</div>';
+    }
+
+    function bindStep2() {
+      document.getElementById('sw-guide-toggle').addEventListener('click', function () {
+        document.getElementById('sw-guide').classList.toggle('hidden');
+      });
+      document.getElementById('sw-back1').addEventListener('click', function () {
+        sw.step = 1;
+        draw();
+      });
+      /* Key 重新编辑后要求重新测试 */
+      document.getElementById('sw-llm-key').addEventListener('input', function () {
+        if (sw.llmOk) {
+          sw.llmOk = false;
+          document.getElementById('sw-next2').disabled = true;
+        }
+      });
+      document.getElementById('sw-next2').addEventListener('click', function () {
+        if (!sw.llmOk) return;
+        sw.step = 3;
+        draw();
+      });
+      var testBtn = document.getElementById('sw-llm-test');
+      testBtn.addEventListener('click', function () {
+        var key = document.getElementById('sw-llm-key').value.trim();
+        if (!key) { toast('请先粘贴 API Key', 'error'); return; }
+        var result = document.getElementById('sw-llm-result');
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<span class="spinner"></span>保存并测试中…';
+        result.innerHTML = '';
+        api('/api/admin/settings', { method: 'PUT', body: {
+            llm_base_url: sw.baseUrl, llm_model: sw.model, llm_api_key: key
+          } })
+          .then(function () { return api('/api/admin/settings/test-llm', { method: 'POST' }); })
+          .then(function (r) {
+            r = r || {};
+            if (r.ok) {
+              sw.llmOk = true;
+              result.innerHTML = '<div class="test-result ok">' + ICONS.checkCircle +
+                '<span>连接成功' + (r.latency_ms != null ? '（延迟 ' + esc(r.latency_ms) + ' ms）' : '') + '，可以进入下一步</span></div>';
+              document.getElementById('sw-next2').disabled = false;
+              refreshMe(); /* mock_mode 已解除，顺手刷新横幅 */
+            } else {
+              sw.llmOk = false;
+              result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+                '<span>连接失败：' + esc(r.error || '未知错误') + '</span></div>';
+            }
+          })
+          .catch(function (e) {
+            if (e.message !== 'unauthorized') {
+              result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+                '<span>请求失败：' + esc(e.message) + '</span></div>';
+            }
+          })
+          .then(function () {
+            testBtn.disabled = false;
+            testBtn.innerHTML = ICONS.zap + '保存并测试连接';
+          });
+      });
+    }
+
+    /* ---------- 第 3 步：搜图 Key（可跳过） ---------- */
+    function step3HTML() {
+      return stepsHTML() +
+        '<h2 class="setup-title">配置搜图 Key（可选）</h2>' +
+        '<div class="setup-sub">配置后 PPT 会自动嵌入 Pexels 高清实景图；<b>可跳过，跳过则 PPT 不自动配图</b></div>' +
+        '<div class="field"><label>Pexels API Key</label>' +
+          '<input type="password" id="sw-pexels-key" autocomplete="new-password" placeholder="粘贴你的 Pexels Key"></div>' +
+        '<button class="btn btn-ghost btn-sm" id="sw-guide-toggle">' + ICONS.info + '如何获取 Key？</button>' +
+        '<div class="guide-panel hidden" id="sw-guide">' +
+          '<div class="guide-item"><div class="gi-body">' +
+            '打开 <a href="https://www.pexels.com/api/" target="_blank" rel="noopener">pexels.com/api</a> →「Get Started」免费注册 → 邮箱验证后点「Your API Key」即可复制' +
+            '<br><span class="gi-note">免费 200 次/小时、2 万次/月，可免费商用、无需署名</span></div></div>' +
+        '</div>' +
+        '<div id="sw-pexels-result" style="margin:10px 0 2px"></div>' +
+        '<div class="setup-foot">' +
+          '<button class="btn btn-ghost" id="sw-skip3">跳过此步</button>' +
+          '<span class="right">' +
+            '<button class="btn btn-outline" id="sw-pexels-test">' + ICONS.zap + '保存并测试</button>' +
+            '<button class="btn btn-primary" id="sw-finish"' + (sw.pexelsDone ? '' : ' disabled') + '>完成</button>' +
+          '</span>' +
+        '</div>';
+    }
+
+    function bindStep3() {
+      document.getElementById('sw-guide-toggle').addEventListener('click', function () {
+        document.getElementById('sw-guide').classList.toggle('hidden');
+      });
+      document.getElementById('sw-skip3').addEventListener('click', function () {
+        sw.step = 4;
+        draw();
+      });
+      document.getElementById('sw-finish').addEventListener('click', function () {
+        if (!sw.pexelsDone) return;
+        sw.step = 4;
+        draw();
+      });
+      var testBtn = document.getElementById('sw-pexels-test');
+      testBtn.addEventListener('click', function () {
+        var key = document.getElementById('sw-pexels-key').value.trim();
+        if (!key) { toast('请先粘贴 Pexels Key', 'error'); return; }
+        var result = document.getElementById('sw-pexels-result');
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<span class="spinner"></span>保存并测试中…';
+        result.innerHTML = '';
+        api('/api/admin/settings', { method: 'PUT', body: { pexels_api_key: key } })
+          .then(function () {
+            return api('/api/admin/settings/test-image', { method: 'POST', body: { provider: 'pexels' } });
+          })
+          .then(function (r) {
+            r = r || {};
+            if (r.ok) {
+              sw.pexelsDone = true;
+              result.innerHTML = '<div class="test-result ok">' + ICONS.checkCircle +
+                '<span>连接成功' + (r.latency_ms != null ? '（延迟 ' + esc(r.latency_ms) + ' ms）' : '') + '</span></div>';
+              document.getElementById('sw-finish').disabled = false;
+            } else {
+              sw.pexelsDone = false;
+              result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+                '<span>连接失败：' + esc(r.error || '未知错误') + '</span></div>';
+            }
+          })
+          .catch(function (e) {
+            if (e.message !== 'unauthorized') {
+              result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+                '<span>请求失败：' + esc(e.message) + '</span></div>';
+            }
+          })
+          .then(function () {
+            testBtn.disabled = false;
+            testBtn.innerHTML = ICONS.zap + '保存并测试';
+          });
+      });
+    }
+
+    /* ---------- 完成页 ---------- */
+    function doneHTML() {
+      return '<div class="setup-done">' +
+        '<div class="sd-icon">' + ICONS.checkCircle + '</div>' +
+        '<h2 class="setup-title">配置完成</h2>' +
+        '<div class="setup-sub">一切就绪，开始创建你的第一个 PPT</div>' +
+        '<div class="setup-foot" style="justify-content:center">' +
+          '<button class="btn btn-primary btn-lg" id="sw-go-new">开始创建第一个 PPT</button>' +
+        '</div></div>';
+    }
+
+    function bindDone() {
+      document.getElementById('sw-go-new').addEventListener('click', function () {
+        setupWizardCompleted = true;
+        close();
+        location.hash = '#/new';
+      });
+    }
+
+    function draw() {
+      var inner = sw.step === 1 ? step1HTML()
+        : sw.step === 2 ? step2HTML()
+        : sw.step === 3 ? step3HTML()
+        : doneHTML();
+      mask.innerHTML = shellHTML(inner);
+      mask.querySelector('#sw-dismiss').addEventListener('click', dismiss);
+      if (sw.step === 1) bindStep1();
+      else if (sw.step === 2) bindStep2();
+      else if (sw.step === 3) bindStep3();
+      else bindDone();
+    }
+
+    draw();
+  }
 
   /* ============================== badges ============================== */
   var PROJECT_STATUS = {
@@ -450,6 +826,10 @@
 
     if (!state.token && parts[0] !== 'login') { location.hash = '#/login'; return; }
     if (state.token && parts[0] === 'login') { location.hash = '#/projects'; return; }
+
+    /* 每次路由切换刷新会话信息：mock 横幅显隐 + 首次配置向导触发都集中在这里
+     * （登录成功跳转 #/projects、带 token 刷新恢复会话两条路径都会经过 route） */
+    refreshMe();
 
     /* unsaved SVG edits guard when leaving the preview route */
     if (parts[0] !== 'project' && state.preview.project) {
@@ -2365,7 +2745,10 @@
             '<button class="btn btn-primary" id="set-img-save">保存搜图配置</button>' +
             '<button class="btn btn-outline" id="set-pexels-clear">清除 Pexels 覆盖</button>' +
             '<button class="btn btn-outline" id="set-pixabay-clear">清除 Pixabay 覆盖</button>' +
+            '<button class="btn btn-outline" id="set-pexels-test">' + ICONS.zap + '测试 Pexels</button>' +
+            '<button class="btn btn-outline" id="set-pixabay-test">' + ICONS.zap + '测试 Pixabay</button>' +
           '</div>' +
+          '<div id="set-img-test-result" style="margin-top:12px"></div>' +
         '</div>' +
       '</div>';
 
@@ -2484,6 +2867,40 @@
         testBtn.innerHTML = ICONS.zap + '测试连接';
       });
     });
+
+    /* Pexels / Pixabay key 测试：交互与模型卡片的「测试连接」一致（转圈 → 成功绿 / 失败红） */
+    function bindTestImage(btnId, provider) {
+      var label = provider === 'pexels' ? 'Pexels' : 'Pixabay';
+      var btn = document.getElementById(btnId);
+      btn.addEventListener('click', function () {
+        var result = document.getElementById('set-img-test-result');
+        btn.disabled = true;
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner"></span>测试中…';
+        result.innerHTML = '';
+        api('/api/admin/settings/test-image', { method: 'POST', body: { provider: provider } }).then(function (r) {
+          r = r || {};
+          if (r.ok) {
+            result.innerHTML = '<div class="test-result ok">' + ICONS.checkCircle +
+              '<span>' + label + ' 连接成功' +
+              (r.latency_ms != null ? ' · 延迟 ' + esc(r.latency_ms) + ' ms' : '') + '</span></div>';
+          } else {
+            result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+              '<span>' + label + ' 连接失败：' + esc(r.error || '未知错误') + '</span></div>';
+          }
+        }).catch(function (e) {
+          if (e.message !== 'unauthorized') {
+            result.innerHTML = '<div class="test-result fail">' + ICONS.xCircle +
+              '<span>请求失败：' + esc(e.message) + '</span></div>';
+          }
+        }).then(function () {
+          btn.disabled = false;
+          btn.innerHTML = orig;
+        });
+      });
+    }
+    bindTestImage('set-pexels-test', 'pexels');
+    bindTestImage('set-pixabay-test', 'pixabay');
   }
 
   /* ============================== boot ============================== */
