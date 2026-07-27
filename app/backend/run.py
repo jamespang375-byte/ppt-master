@@ -44,6 +44,15 @@ if str(_REPO_ROOT) not in sys.path:
 from app.backend.config import get_settings  # noqa: E402
 from app.backend.main import app  # noqa: E402
 
+# Windows 上 stdout 被重定向到文件/管道时编码退化为 cp1252，中文启动横幅会
+# 触发 UnicodeEncodeError 直接崩掉冻结程序（CI windows 冒烟实测）。保持原编码
+# 只对不可编码字符做替换：交互终端（GBK 控制台）中文显示不受影响。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+    except Exception:
+        pass
+
 
 def _port_in_use(host: str, port: int) -> bool:
     bind_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
