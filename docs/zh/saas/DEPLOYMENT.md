@@ -137,7 +137,7 @@ journalctl -u pptsaas -f        # 查看日志
 
 ### 2.2 手动打包（必须在 Windows 构建机上执行）
 
-PyInstaller 不能交叉编译，Windows 产物只能在 Windows 上构建：
+PyInstaller 不能交叉编译，Windows 产物只能在 Windows 上构建。**零基础的逐步操作指南（含构建环境安装、验证、分发说明、常见问题）见 [BUILD_WINDOWS.md](BUILD_WINDOWS.md)**，此处仅列命令：
 
 ```powershell
 git clone <repo-url> ppt-master
