@@ -169,17 +169,19 @@ pptsaas\
 
 1. 解压 `pptsaas-windows-x86_64.zip` 到任意目录，例如 `D:\pptsaas\`。
 2. 把 `.env.example` 复制为 `.env`，至少写入 LLM 配置（格式同 1.3 节）；不配则进入 mock 演示模式。
-3. 双击 `start.bat`：启动服务，浏览器访问 `http://localhost:8310`。
-4. 数据存放在解压目录的 `data\`（或 `.env` 中 `PPTSAAS_DATA_DIR` 指定路径）。
+3. 双击 `start.bat`：服务启动后**自动弹出应用窗口**（Edge/Chrome 的无边框 `--app` 模式，看起来就是独立应用；找不到这两种浏览器时退回默认浏览器标签页）。
+4. 停止：直接关闭黑色控制台窗口（或 Ctrl+C）。数据存放在解压目录的 `data\`（或 `.env` 中 `PPTSAAS_DATA_DIR` 指定路径）。
+
+> 桌面体验细节（`app/backend/run.py`）：
+> - 启动横幅会打印访问地址与运行模式（真实模型 / mock 演示）。
+> - 端口被占用时自动改用一个空闲端口并在横幅中提示，不会直接闪退；需要固定端口可在 `.env` 设 `PPTSAAS_PORT`。
+> - 不想自动打开界面（纯服务器部署、远程终端）时设 `PPTSAAS_NO_BROWSER=1`。
 
 ### 2.4 防火墙、杀毒软件与端口
 
-- 默认监听 `0.0.0.0:8310`。**仅本机使用**时，建议在 `.env` 中设 `PPTSAAS_HOST=127.0.0.1`，避免局域网可访问。
-- 首次启动若 Windows Defender 防火墙弹出「是否允许访问网络」：
-  - 仅本机使用 → 选「取消」，并把 host 改为 `127.0.0.1`；
-  - 需要局域网内同事访问 → 勾选「专用网络」允许，并确认 8310 端口未被占用（`netstat -ano | findstr 8310`）。
+- `start.bat` 默认仅监听 `127.0.0.1`（本机回环），因此**首次启动不会弹防火墙提示**，局域网也无法访问。需要局域网内同事访问时，在 `.env` 中设 `PPTSAAS_HOST=0.0.0.0`，并在防火墙弹窗中勾选「专用网络」允许。
 - **杀毒软件误报**：PyInstaller 冻结的 exe 与内嵌 `python\` 目录（自包含解释器 + 大量第三方库）是常见的启发式杀软误报对象。产物未做代码签名，遇误报请将解压目录加入杀软白名单；企业环境可分发给 IT 做哈希登记（CI 同时产出 `SHA256SUMS.txt`）。
-- 端口冲突时在 `.env` 改 `PPTSAAS_PORT`，例如 `8600`。
+- 端口冲突无需手动处理（自动避让）；确需固定端口时在 `.env` 改 `PPTSAAS_PORT`，例如 `8600`。
 
 ---
 
@@ -208,7 +210,7 @@ tar.gz 解压后的目录结构与 2.2 节相同（`pptsaas.sh` 对应 `start.ba
 tar -xzf pptsaas-linux-x86_64.tar.gz
 cd pptsaas
 cp .env.example .env      # 填入 PPTSAAS_LLM_API_KEY 等；不配为 mock 演示模式
-./pptsaas.sh              # 浏览器访问 http://localhost:8310
+./pptsaas.sh              # 启动后自动打开应用窗口（无桌面/浏览器的环境设 PPTSAAS_NO_BROWSER=1，再手动访问 http://localhost:8310）
 ```
 
 - 数据目录默认在解压目录的 `data/`，可用 `PPTSAAS_DATA_DIR` 改到别处。

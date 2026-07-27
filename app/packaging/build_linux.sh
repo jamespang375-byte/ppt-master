@@ -34,7 +34,7 @@ docker run --rm -v "$PWD/dist:/dist" debian:bookworm-slim bash -c '
   mkdir /w && tar -xzf /dist/pptsaas-linux-x86_64.tar.gz -C /w
   cd /w/pptsaas
   ./python/bin/python3.12 -c "import pptx, fitz, PIL, requests, openpyxl"
-  PPTSAAS_PORT=8399 PPTSAAS_HOST=127.0.0.1 nohup ./pptsaas.sh > server.log 2>&1 &
+  PPTSAAS_PORT=8399 PPTSAAS_HOST=127.0.0.1 PPTSAAS_NO_BROWSER=1 nohup ./pptsaas.sh > server.log 2>&1 &
   ok=""
   for i in $(seq 1 45); do
     if curl -fsS http://127.0.0.1:8399/ -o /dev/null 2>/dev/null; then ok=1; break; fi
@@ -55,4 +55,4 @@ ls -lh dist/pptsaas-linux-x86_64.tar.gz dist/pptsaas-x86_64.AppImage 2>/dev/null
 echo
 echo "使用：tar -xzf dist/pptsaas-linux-x86_64.tar.gz && cd pptsaas"
 echo "      cp .env.example .env  # 填入 PPTSAAS_LLM_API_KEY（不配则为 mock 演示模式）"
-echo "      ./pptsaas.sh          # 浏览器访问 http://localhost:8310"
+echo "      ./pptsaas.sh          # 启动后浏览器自动打开应用窗口（无浏览器环境请手动访问 http://localhost:8310）"

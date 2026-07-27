@@ -50,8 +50,11 @@ Copy-Item -Recurse dist\pptsaas pkg\pptsaas\app
 @'
 @echo off
 setlocal
+title PPT Master Agent
 set "HERE=%~dp0"
 set "PPTSAAS_PYTHON=%HERE%python\python.exe"
+rem 默认仅监听本机回环，避免 Windows 防火墙弹窗；对外提供服务时在 .env 设 PPTSAAS_HOST=0.0.0.0
+if not defined PPTSAAS_HOST set "PPTSAAS_HOST=127.0.0.1"
 if not defined PPTSAAS_DATA_DIR set "PPTSAAS_DATA_DIR=%HERE%data"
 if not exist "%PPTSAAS_DATA_DIR%" mkdir "%PPTSAAS_DATA_DIR%"
 cd /d "%HERE%"
@@ -59,16 +62,17 @@ cd /d "%HERE%"
 '@ -replace "`n", "`r`n" | Set-Content -NoNewline pkg\pptsaas\start.bat -Encoding ASCII
 @'
 # PPT Master Agent SaaS 配置（与 start.bat 同目录；不配 LLM key 为 mock 演示模式）
+# 双击 start.bat 后浏览器会自动打开应用窗口，无需手动访问地址
 PPTSAAS_LLM_BASE_URL=https://api.deepseek.com/v1
 PPTSAAS_LLM_API_KEY=
 PPTSAAS_LLM_MODEL=deepseek-chat
 # PEXELS_API_KEY=
-# PPTSAAS_HOST=127.0.0.1
 # PPTSAAS_PORT=8310
 '@ -replace "`n", "`r`n" | Set-Content -NoNewline pkg\pptsaas\.env.example -Encoding UTF8
 
 $env:PPTSAAS_PORT = "8399"
 $env:PPTSAAS_HOST = "127.0.0.1"
+$env:PPTSAAS_NO_BROWSER = "1"
 $proc = Start-Process -FilePath "pkg\pptsaas\start.bat" -PassThru `
   -RedirectStandardOutput "$env:TEMP\pptsaas-out.log" `
   -RedirectStandardError "$env:TEMP\pptsaas-err.log"
@@ -95,6 +99,6 @@ Compress-Archive -Path pkg\pptsaas -DestinationPath $ZipPath
 
 Write-Host ""
 Write-Host "完成：$ZipPath"
-Write-Host "使用：解压后把 .env.example 复制为 .env 填入 key，双击 start.bat（访问 http://localhost:8310）"
+Write-Host "使用：解压后把 .env.example 复制为 .env 填入 key，双击 start.bat 即可（浏览器会自动打开应用窗口）"
 Write-Host "提示：首次启动如弹防火墙提示，仅本机使用选取消并在 .env 设 PPTSAAS_HOST=127.0.0.1"
 Write-Host "      杀毒软件可能对内嵌 python\ 目录误报，需加白名单（见 docs/zh/saas/DEPLOYMENT.md）"
